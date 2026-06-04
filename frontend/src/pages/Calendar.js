@@ -289,7 +289,7 @@ function GrcProjectChip({ project, onClick, onDragStart, isDragging }) {
   );
 }
 
-function TeamEngBlock({ engagement, onClick, onDragStart, isDragging }) {
+function TeamEngBlock({ engagement, onClick, onDragStart, onPointerDown, isDragging }) {
   const s = ENG_STATUS[engagement.status] || ENG_STATUS.PLANNING;
   return (
     <Box
@@ -305,6 +305,9 @@ function TeamEngBlock({ engagement, onClick, onDragStart, isDragging }) {
       onClick={(e) => {
         e.stopPropagation();
         onClick(engagement);
+      }}
+      onPointerDown={(e) => {
+        if (onPointerDown) onPointerDown(engagement, e);
       }}
       sx={{
         bgcolor: s.bg, color: s.text,
@@ -519,6 +522,7 @@ export default function Calendar() {
   const dragSourceMemberRef = useRef(null);
   const dragGrcRef   = useRef(null); // mirrors dragGrcAssessment but always current (no stale closure)
   const dragGrcProjectRef = useRef(null);
+  const suppressNextEngClickRef = useRef(false);
 
   const beginEngagementDrag = useCallback((engagement, sourceMember, event) => {
     if (event?.dataTransfer) {
@@ -970,18 +974,21 @@ const handleDeleteEvent = async (id) => {
       catch (e) { console.error(e); setSnack('Failed.'); fetchGrcAssessments(); }
     } else if ((dragEng || dragEngRef.current) && (dragSourceMember || dragSourceMemberRef.current)) {
       const currentEng = dragEng || dragEngRef.current;
-      const currentSource = dragSourceMember || dragSourceMemberRef.current;
-      const { id: engId, name } = currentEng; const srcId = currentSource.id;
+      const { id: engId, name } = currentEng;
       setEngagements(prev => prev.map(e => e.id !== engId ? e : {
         ...e,
-        lead_pentester: sameId(e.lead_pentester, srcId) ? null : e.lead_pentester,
-        project_manager: sameId(e.project_manager, srcId) ? null : e.project_manager,
-        team_members: withoutId(e.team_members, srcId),
+        lead_pentester: null,
+        project_manager: null,
+        team_members: [],
       }));
       setSnack(`"${name}" returned to unassigned pool`);
       clearDrag();
       try {
-        const res = await api.post(`/engagements/${engId}/remove_member/`, { member_id: srcId });
+        const res = await api.patch(`/engagements/${engId}/`, {
+          lead_pentester: null,
+          project_manager: null,
+          team_members: [],
+        });
         setEngagements(prev => prev.map(e => e.id !== engId ? e : res.data));
         dispatchAssignment();
       }
@@ -1198,6 +1205,101 @@ const handleDeleteEvent = async (id) => {
     } catch (e) { console.error(e); setSnack('Failed to unassign from engagement.'); fetchEngagements(); }
   };
 
+  const handleEngagementPointerDown = (engagement, sourceMember, event) => {
+    if (event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    let hasStarted = false;
+
+    const clearPointerDrag = () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    const setDragHoverFromPoint = (clientX, clientY) => {
+      const target = document.elementFromPoint(clientX, clientY);
+      const dropCell = target?.closest?.('[data-calendar-drop-member][data-calendar-drop-day]');
+      const pool = target?.closest?.('[data-calendar-unassigned-pool="true"]');
+
+      if (dropCell) {
+        const memberId = dropCell.getAttribute('data-calendar-drop-member');
+        const day = dropCell.getAttribute('data-calendar-drop-day');
+        setDraggingOverPool(false);
+        if (!sameId(dragOverRef.current.member, memberId) || dragOverRef.current.day !== day) {
+          dragOverRef.current = { member: memberId, day };
+          setDragOverMember(memberId);
+          setDragOverDay(day);
+        }
+        return { type: 'cell', memberId, day };
+      }
+
+      if (pool) {
+        dragOverRef.current = { member: null, day: null };
+        setDragOverMember(null);
+        setDragOverDay(null);
+        setDraggingOverPool(true);
+        return { type: 'pool' };
+      }
+
+      setDraggingOverPool(false);
+      return null;
+    };
+
+    function onMove(moveEvent) {
+      const distance = Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY);
+      if (!hasStarted && distance < 6) return;
+      if (!hasStarted) {
+        hasStarted = true;
+        beginEngagementDrag(engagement, sourceMember, null);
+        document.body.style.cursor = 'grabbing';
+        document.body.style.userSelect = 'none';
+      }
+      moveEvent.preventDefault();
+      setDragHoverFromPoint(moveEvent.clientX, moveEvent.clientY);
+    }
+
+    function onUp(upEvent) {
+      clearPointerDrag();
+      if (!hasStarted) return;
+      suppressNextEngClickRef.current = true;
+      const dropTarget = setDragHoverFromPoint(upEvent.clientX, upEvent.clientY);
+      setDraggingOverPool(false);
+
+      if (dropTarget?.type === 'pool') {
+        dragEngRef.current = engagement;
+        dragSourceMemberRef.current = sourceMember || null;
+        handleReturnToPool();
+        return;
+      }
+
+      if (dropTarget?.type === 'cell') {
+        const targetMember = members.find(member => sameId(member.id, dropTarget.memberId));
+        const targetDay = dayjs(dropTarget.day);
+        if (targetMember && sourceMember && !sameId(targetMember.id, sourceMember.id)) {
+          setReassignDlg({ engagement, targetMember, sourceMember, targetDay });
+        } else if (targetMember && sourceMember && sameId(targetMember.id, sourceMember.id) && targetDay.format('YYYY-MM-DD') !== engagement.start_date) {
+          handleDateOnlyChange(engagement, targetDay);
+        } else if (targetMember && !sourceMember) {
+          handleAssignFromPool(engagement, targetMember, targetDay);
+        }
+        return;
+      }
+
+      dragOverRef.current = { member: null, day: null };
+      dragEngRef.current = null;
+      dragSourceMemberRef.current = null;
+      setDragEng(null);
+      setDragSourceMember(null);
+      setDragOverMember(null);
+      setDragOverDay(null);
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp, { once: true });
+  };
+
   const openDetail = async (event) => {
     setDetailDlg(event);
     setDetailTab(0);
@@ -1278,7 +1380,11 @@ const handleDeleteEvent = async (id) => {
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const unassignedEngagements = useMemo(() =>
-    engagements.filter(eng => !eng.lead_pentester),
+    engagements.filter(eng =>
+      !eng.lead_pentester &&
+      !eng.project_manager &&
+      !(eng.team_members || []).length
+    ),
     [engagements]
   );
 
@@ -1651,6 +1757,8 @@ const handleDeleteEvent = async (id) => {
                       const isDropCell   = (isInPreview && cellDate === dragOverDay) || isEventDrop;
                       return (
                         <td key={cellDate}
+                          data-calendar-drop-member={member.id}
+                          data-calendar-drop-day={cellDate}
                           onDragOver={(e) => {
                             if (currentDragEng || hasNativeEngagementDrag(e) || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
                               e.preventDefault();
@@ -1737,8 +1845,15 @@ const handleDeleteEvent = async (id) => {
                             <TeamEngBlock
                               key={`eng-${eng.id}`}
                               engagement={eng}
-                              onClick={() => openEngDetail(eng, member)}
+                              onClick={() => {
+                                if (suppressNextEngClickRef.current) {
+                                  suppressNextEngClickRef.current = false;
+                                  return;
+                                }
+                                openEngDetail(eng, member);
+                              }}
                               onDragStart={(engagement, event) => beginEngagementDrag(engagement, member, event)}
+                              onPointerDown={(engagement, event) => handleEngagementPointerDown(engagement, member, event)}
                               isDragging={(dragEng || dragEngRef.current)?.id === eng.id}
                             />
                           ))}
@@ -1806,6 +1921,7 @@ const handleDeleteEvent = async (id) => {
       {/* ── Unassigned pool (team view only) ── */}
       {viewMode === 'team' && !isClient && (
         <Paper
+          data-calendar-unassigned-pool="true"
           onDragOver={(e) => {
             if ((dragSourceMember || dragSourceMemberRef.current || hasNativeEngagementDrag(e)) && (dragEng || dragEngRef.current || hasNativeEngagementDrag(e) || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
               e.preventDefault();
