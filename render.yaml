@@ -19,11 +19,13 @@ services:
           name: mainframe-db
           property: connectionString
       - key: ALLOWED_HOSTS
-        value: mainframe-api.onrender.com,mainframe-api.ozicyber.com.au
+        value: .onrender.com,mainframe-api.ozicyber.com.au
       - key: CORS_ALLOWED_ORIGINS
-        value: https://mainframe.ozicyber.com.au,https://mainframe-web.onrender.com
+        value: https://mainframe.ozicyber.com.au
+      - key: CORS_ALLOWED_ORIGIN_REGEXES
+        value: ^https://mainframe-web.*\.onrender\.com$
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://mainframe.ozicyber.com.au,https://mainframe-web.onrender.com
+        value: https://mainframe.ozicyber.com.au
       - key: FRONTEND_URL
         value: https://mainframe.ozicyber.com.au
       - key: EMAIL_HOST
@@ -43,7 +45,7 @@ services:
     staticPublishPath: build
     envVars:
       - key: REACT_APP_API_URL
-        value: https://mainframe-api.onrender.com
+        value: https://mainframe-api-79cu.onrender.com
 
 databases:
   - name: mainframe-db
