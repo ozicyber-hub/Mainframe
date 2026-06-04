@@ -507,6 +507,8 @@ export default function Calendar() {
   const [snack,            setSnack]            = useState('');
 
   const dragOverRef  = useRef({ member: null, day: null });
+  const dragEngRef   = useRef(null);
+  const dragSourceMemberRef = useRef(null);
   const dragGrcRef   = useRef(null); // mirrors dragGrcAssessment but always current (no stale closure)
   const dragGrcProjectRef = useRef(null);
 
@@ -834,6 +836,8 @@ const handleDeleteEvent = async (id) => {
       return updated;
     }));
     setSnack(`"${engagement.name}" moved to ${targetMember.first_name} ${targetMember.last_name}`);
+    dragEngRef.current = null;
+    dragSourceMemberRef.current = null;
     setReassignDlg(null); setDragEng(null); setDragSourceMember(null); setDragOverMember(null);
     dragOverRef.current = { member: null, day: null };
     try {
@@ -849,6 +853,8 @@ const handleDeleteEvent = async (id) => {
     const { new_start_date, new_end_date } = shiftEngagementDates(eng, targetDay);
     setEngagements(prev => prev.map(e => e.id === eng.id ? { ...e, start_date: new_start_date, end_date: new_end_date } : e));
     setSnack(`"${eng.name}" rescheduled to ${new_start_date}`);
+    dragEngRef.current = null;
+    dragSourceMemberRef.current = null;
     setDragEng(null); setDragSourceMember(null); setDragOverMember(null); setDragOverDay(null);
     dragOverRef.current = { member: null, day: null };
     try {
@@ -883,6 +889,8 @@ const handleDeleteEvent = async (id) => {
   const handleReturnToPool = async () => {
     const clearDrag = () => {
       dragOverRef.current = { member: null, day: null };
+      dragEngRef.current = null;
+      dragSourceMemberRef.current = null;
       dragGrcRef.current = null;
       dragGrcProjectRef.current = null;
       setDragEng(null); setDragTask(null); setDragGridEvent(null); setDragGrcAssessment(null); setDragGrcProject(null);
@@ -910,8 +918,10 @@ const handleDeleteEvent = async (id) => {
       clearDrag();
       try { await api.patch(`/assessments/list/${a.id}/`, { grc_consultant: null }); }
       catch (e) { console.error(e); setSnack('Failed.'); fetchGrcAssessments(); }
-    } else if (dragEng && dragSourceMember) {
-      const { id: engId, name } = dragEng; const srcId = dragSourceMember.id;
+    } else if ((dragEng || dragEngRef.current) && (dragSourceMember || dragSourceMemberRef.current)) {
+      const currentEng = dragEng || dragEngRef.current;
+      const currentSource = dragSourceMember || dragSourceMemberRef.current;
+      const { id: engId, name } = currentEng; const srcId = currentSource.id;
       setEngagements(prev => prev.map(e => e.id !== engId ? e : {
         ...e,
         lead_pentester: sameId(e.lead_pentester, srcId) ? null : e.lead_pentester,
@@ -1080,6 +1090,8 @@ const handleDeleteEvent = async (id) => {
       return updated;
     }));
     setSnack(`${targetMember.first_name} ${targetMember.last_name} added to team for "${engagement.name}"`);
+    dragEngRef.current = null;
+    dragSourceMemberRef.current = null;
     setReassignDlg(null); setDragEng(null); setDragSourceMember(null); setDragOverMember(null); setDragOverDay(null);
     dragOverRef.current = { member: null, day: null };
     try {
@@ -1106,6 +1118,8 @@ const handleDeleteEvent = async (id) => {
       ...(dates.new_start_date ? { start_date: dates.new_start_date, end_date: dates.new_end_date } : {}),
     }));
     setSnack(`"${eng.name}" assigned to ${member.first_name} ${member.last_name}`);
+    dragEngRef.current = null;
+    dragSourceMemberRef.current = null;
     setDragEng(null); setDragSourceMember(null); setDragOverMember(null);
     dragOverRef.current = { member: null, day: null };
     try {
@@ -1530,6 +1544,8 @@ const handleDeleteEvent = async (id) => {
               </thead>
               <tbody onDragEnd={() => {
                 dragOverRef.current = { member: null, day: null };
+                dragEngRef.current = null;
+                dragSourceMemberRef.current = null;
                 dragGrcRef.current  = null;
                 dragGrcProjectRef.current = null;
                 setDragEng(null); setDragTask(null); setDragGridEvent(null);
@@ -1563,8 +1579,9 @@ const handleDeleteEvent = async (id) => {
                       const { engs: memberEngs, evs: memberEvs, tasks: memberTasks, grcs: memberGrcs, grcProjects: memberGrcProjects } =
                         memberDayData[`${member.id}:${cellDate}`] || { engs: [], evs: [], tasks: [], grcs: [], grcProjects: [] };
                       const isEmpty    = memberEngs.length === 0 && memberEvs.length === 0 && memberTasks.length === 0 && memberGrcs.length === 0 && memberGrcProjects.length === 0;
-                      const isDragSource = dragEng
-                        ? memberEngs.some(e => e.id === dragEng.id)
+                      const currentDragEng = dragEng || dragEngRef.current;
+                      const isDragSource = currentDragEng
+                        ? memberEngs.some(e => e.id === currentDragEng.id)
                         : dragTask
                         ? memberTasks.some(t => t.id === dragTask.id)
                         : dragGridEvent
@@ -1584,7 +1601,7 @@ const handleDeleteEvent = async (id) => {
                       return (
                         <td key={cellDate}
                           onDragOver={(e) => {
-                            if (dragEng || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
+                            if (currentDragEng || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
                               e.preventDefault();
                               if (!sameId(dragOverRef.current.member, member.id) || dragOverRef.current.day !== cellDate) {
                                 dragOverRef.current = { member: member.id, day: cellDate };
@@ -1603,12 +1620,14 @@ const handleDeleteEvent = async (id) => {
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
-                            if (dragEng && dragSourceMember && !sameId(member.id, dragSourceMember.id)) {
-                              setReassignDlg({ engagement: dragEng, targetMember: member, sourceMember: dragSourceMember, targetDay: day });
-                            } else if (dragEng && dragSourceMember && sameId(member.id, dragSourceMember.id) && day.format('YYYY-MM-DD') !== dragEng.start_date) {
-                              handleDateOnlyChange(dragEng, day);
-                            } else if (dragEng && !dragSourceMember) {
-                              handleAssignFromPool(dragEng, member, day);
+                            const dropEng = dragEng || dragEngRef.current;
+                            const dropSourceMember = dragSourceMember || dragSourceMemberRef.current;
+                            if (dropEng && dropSourceMember && !sameId(member.id, dropSourceMember.id)) {
+                              setReassignDlg({ engagement: dropEng, targetMember: member, sourceMember: dropSourceMember, targetDay: day });
+                            } else if (dropEng && dropSourceMember && sameId(member.id, dropSourceMember.id) && day.format('YYYY-MM-DD') !== dropEng.start_date) {
+                              handleDateOnlyChange(dropEng, day);
+                            } else if (dropEng && !dropSourceMember) {
+                              handleAssignFromPool(dropEng, member, day);
                             } else if (dragTask && dragSourceMember && !sameId(member.id, dragSourceMember.id)) {
                               handleDragTaskInGrid(dragTask, member, day);
                             } else if (dragTask && dragSourceMember && sameId(member.id, dragSourceMember.id) && day.format('YYYY-MM-DD') !== dragTask.due_date) {
@@ -1633,7 +1652,7 @@ const handleDeleteEvent = async (id) => {
                             setDragOverDay(null);
                           }}
                           onClick={() => {
-                            if (isEmpty && !dragEng) {
+                            if (isEmpty && !currentDragEng) {
                               const ds = day.format('YYYY-MM-DD');
                               setNewEvent(e => ({ ...e, start_date: `${ds}T09:00`, end_date: `${ds}T17:00`, attendee_ids: [member.id] }));
                               setEventDlg(true);
@@ -1659,7 +1678,7 @@ const handleDeleteEvent = async (id) => {
                               ? `1px dashed ${theme.palette.primary.main}55`
                               : 'none',
                             minHeight: 80,
-                            cursor: isEmpty && !dragEng ? 'pointer' : 'default',
+                            cursor: isEmpty && !currentDragEng ? 'pointer' : 'default',
                             transition: 'background 0.08s, outline 0.08s',
                           }}>
                           {memberEngs.map(eng => (
@@ -1667,8 +1686,13 @@ const handleDeleteEvent = async (id) => {
                               key={`eng-${eng.id}`}
                               engagement={eng}
                               onClick={() => openEngDetail(eng, member)}
-                              onDragStart={(e) => { setDragEng(e); setDragSourceMember(member); }}
-                              isDragging={dragEng?.id === eng.id}
+                              onDragStart={(e) => {
+                                dragEngRef.current = e;
+                                dragSourceMemberRef.current = member;
+                                setDragEng(e);
+                                setDragSourceMember(member);
+                              }}
+                              isDragging={(dragEng || dragEngRef.current)?.id === eng.id}
                             />
                           ))}
                           {memberEvs.map(ev => (
@@ -1707,7 +1731,7 @@ const handleDeleteEvent = async (id) => {
                               isDragging={dragGrcProject?.id === p.id}
                             />
                           ))}
-                          {isEmpty && !dragEng && (
+                          {isEmpty && !currentDragEng && (
                             <Box sx={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, '&:hover': { opacity: 1 } }}>
                               <Typography sx={{ fontSize: '0.65rem', color: 'text.disabled' }}>+ Add</Typography>
                             </Box>
@@ -1736,7 +1760,7 @@ const handleDeleteEvent = async (id) => {
       {viewMode === 'team' && !isClient && (
         <Paper
           onDragOver={(e) => {
-            if (dragSourceMember && (dragEng || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
+            if ((dragSourceMember || dragSourceMemberRef.current) && (dragEng || dragEngRef.current || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
               e.preventDefault();
               setDraggingOverPool(true);
             }
@@ -1799,8 +1823,20 @@ const handleDeleteEvent = async (id) => {
                     <Box
                       key={eng.id}
                       draggable
-                      onDragStart={() => { setDragEng(eng); setDragSourceMember(null); }}
-                      onDragEnd={() => { setDragEng(null); setDragSourceMember(null); setDragOverMember(null); setDragOverDay(null); }}
+                      onDragStart={() => {
+                        dragEngRef.current = eng;
+                        dragSourceMemberRef.current = null;
+                        setDragEng(eng);
+                        setDragSourceMember(null);
+                      }}
+                      onDragEnd={() => {
+                        dragEngRef.current = null;
+                        dragSourceMemberRef.current = null;
+                        setDragEng(null);
+                        setDragSourceMember(null);
+                        setDragOverMember(null);
+                        setDragOverDay(null);
+                      }}
                       onClick={() => openEngDetail(eng)}
                       sx={{
                         flexShrink: 0, width: 210,
@@ -3034,7 +3070,7 @@ const handleDeleteEvent = async (id) => {
       </Dialog>
 
       {/* ── Reassign Confirmation ── */}
-      <Dialog open={!!reassignDlg} onClose={() => { setReassignDlg(null); setDragEng(null); setReassignMode('replace'); }} maxWidth="xs" fullWidth>
+      <Dialog open={!!reassignDlg} onClose={() => { dragEngRef.current = null; dragSourceMemberRef.current = null; setReassignDlg(null); setDragEng(null); setDragSourceMember(null); setReassignMode('replace'); }} maxWidth="xs" fullWidth>
         {reassignDlg && (() => {
           const penRoleMismatch = reassignDlg.targetMember.role && reassignDlg.targetMember.role !== 'PENTESTER' && reassignDlg.targetMember.role !== 'ADMIN';
           return (
@@ -3083,7 +3119,7 @@ const handleDeleteEvent = async (id) => {
               </ToggleButtonGroup>
             </DialogContent>
             <DialogActions>
-              <Button onClick={() => { setReassignDlg(null); setDragEng(null); setReassignMode('replace'); }}>Cancel</Button>
+              <Button onClick={() => { dragEngRef.current = null; dragSourceMemberRef.current = null; setReassignDlg(null); setDragEng(null); setDragSourceMember(null); setReassignMode('replace'); }}>Cancel</Button>
               <Button variant="contained"
                 onClick={reassignMode === 'add' ? handleAddToTeam : handleReassign}
                 sx={{ bgcolor: theme.palette.primary.main }}>
