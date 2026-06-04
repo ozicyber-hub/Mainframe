@@ -25,12 +25,12 @@ class Engagement(models.Model):
     ]
 
     STATUS_CHOICES = [
-        ('PLANNING', 'Planning'),
+        ('PLANNING', 'Placeholder'),
         ('ACTIVE', 'Active'),
         ('REPORTING', 'Reporting'),
-        ('REVIEW', 'Under Review'),
+        ('REVIEW', 'Client Review'),
         ('COMPLETED', 'Completed'),
-        ('ON_HOLD', 'On Hold'),
+        ('ON_HOLD', 'Delayed'),
         ('CANCELLED', 'Cancelled'),
     ]
 

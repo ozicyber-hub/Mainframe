@@ -43,6 +43,16 @@ const STATUS_COLORS = {
   CANCELLED: 'error',
 };
 
+const ENGAGEMENT_STATUS_OPTIONS = [
+  { value: 'PLANNING', label: 'Placeholder' },
+  { value: 'ACTIVE', label: 'Active' },
+  { value: 'REPORTING', label: 'Reporting' },
+  { value: 'REVIEW', label: 'Client Review' },
+  { value: 'COMPLETED', label: 'Completed' },
+  { value: 'ON_HOLD', label: 'Delayed' },
+  { value: 'CANCELLED', label: 'Cancelled' },
+];
+
 const emptyEngagement = {
   name: '',
   description: '',
@@ -371,8 +381,8 @@ const OrganizationDetail = () => {
                 <FormControl fullWidth>
                   <InputLabel>Status</InputLabel>
                   <Select name="status" value={formData.status} onChange={handleChange} label="Status">
-                    {['PLANNING','ACTIVE','REPORTING','REVIEW','COMPLETED','ON_HOLD','CANCELLED'].map(s => (
-                      <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>
+                    {ENGAGEMENT_STATUS_OPTIONS.map(s => (
+                      <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>
@@ -470,8 +480,8 @@ const OrganizationDetail = () => {
                   <InputLabel>Status</InputLabel>
                   <Select value={editData.status} label="Status"
                     onChange={e => setEditData(p => ({ ...p, status: e.target.value }))}>
-                    {['PLANNING','ACTIVE','REPORTING','REVIEW','COMPLETED','ON_HOLD','CANCELLED'].map(s => (
-                      <MenuItem key={s} value={s}>{s.replace('_', ' ')}</MenuItem>
+                    {ENGAGEMENT_STATUS_OPTIONS.map(s => (
+                      <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
                     ))}
                   </Select>
                 </FormControl>

@@ -18,6 +18,16 @@ const STATUS_COLORS = {
   ON_HOLD:    { bg: '#fafafa', text: '#616161' },
 };
 
+const STATUS_LABELS = {
+  PLANNING: 'Placeholder',
+  ACTIVE: 'Active',
+  REPORTING: 'Reporting',
+  REVIEW: 'Client Review',
+  COMPLETED: 'Completed',
+  ON_HOLD: 'Delayed',
+  CANCELLED: 'Cancelled',
+};
+
 const TYPE_LABELS = {
   WEB_APP: 'Web App', MOBILE_APP: 'Mobile', NETWORK: 'Network',
   API: 'API', CLOUD: 'Cloud', SOCIAL: 'Social Eng.', PHYSICAL: 'Physical',
@@ -89,7 +99,7 @@ const Engagements = () => {
                         {eng.engagement_type && (
                           <Chip label={TYPE_LABELS[eng.engagement_type] || eng.engagement_type} size="small" variant="outlined" />
                         )}
-                        <Chip label={eng.status} size="small"
+                        <Chip label={eng.status_display || STATUS_LABELS[eng.status] || eng.status} size="small"
                           sx={{ bgcolor: sc.bg, color: sc.text, fontWeight: 600 }} />
                       </Box>
                       <Box sx={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>

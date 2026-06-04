@@ -10,10 +10,21 @@ from .models import Report, ReportTemplate, ReportExport, ReportMessage, AttackC
 from .serializers import ReportSerializer, ReportCreateSerializer, ReportTemplateSerializer, ReportExportSerializer, ReportMessageSerializer, AttackChainEntrySerializer
 from findings.models import Finding
 import re
+import os
 
 
 _REPORT_WRITE_ROLES = {'SUPERADMIN', 'ADMIN', 'PENTESTER', 'PROJECT_MANAGER'}
 _TEMPLATE_ADMIN_ROLES = {'SUPERADMIN', 'ADMIN'}
+
+
+def _existing_docx_template_path(template):
+    if not template or not template.docx_file or not template.docx_file.name:
+        return None
+    try:
+        path = template.docx_file.path
+    except (NotImplementedError, ValueError):
+        return None
+    return path if os.path.exists(path) else None
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):
@@ -151,27 +162,27 @@ class ReportViewSet(viewsets.ModelViewSet):
             if template_id:
                 try:
                     picked = ReportTemplate.objects.get(pk=template_id)
-                    if picked.docx_file and picked.docx_file.name:
-                        template_path = picked.docx_file.path
+                    template_path = _existing_docx_template_path(picked)
                 except ReportTemplate.DoesNotExist:
                     pass
 
             if not template_path:
                 tmpl = report.template
-                if tmpl and tmpl.docx_file and tmpl.docx_file.name:
-                    template_path = tmpl.docx_file.path
+                template_path = _existing_docx_template_path(tmpl)
 
             if not template_path:
                 org = getattr(report.engagement, 'organization', None)
-                org_tmpl = (
-                    ReportTemplate.objects.filter(has_file, organization=org, is_default=True).first()
-                    or ReportTemplate.objects.filter(has_file, organization=org).order_by('-created_at').first()
-                    or ReportTemplate.objects.filter(has_file, is_global=True, is_default=True).first()
-                    or ReportTemplate.objects.filter(has_file, is_global=True).order_by('-created_at').first()
-                    or ReportTemplate.objects.filter(has_file).order_by('-created_at').first()
-                )
-                if org_tmpl:
-                    template_path = org_tmpl.docx_file.path
+                candidate_templates = [
+                    ReportTemplate.objects.filter(has_file, organization=org, is_default=True).first(),
+                    ReportTemplate.objects.filter(has_file, organization=org).order_by('-created_at').first(),
+                    ReportTemplate.objects.filter(has_file, is_global=True, is_default=True).first(),
+                    ReportTemplate.objects.filter(has_file, is_global=True).order_by('-created_at').first(),
+                    ReportTemplate.objects.filter(has_file).order_by('-created_at').first(),
+                ]
+                for org_tmpl in candidate_templates:
+                    template_path = _existing_docx_template_path(org_tmpl)
+                    if template_path:
+                        break
 
             try:
                 buffer = generate_report_docx(report, findings_qs, template_path=template_path)

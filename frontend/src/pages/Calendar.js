@@ -72,12 +72,12 @@ const EVENT_ICONS = {
 };
 
 const ENG_STATUS = {
-  PLANNING:   { bg: '#e3f2fd', border: '#1565c0', text: '#1565c0', label: 'Planning' },
+  PLANNING:   { bg: '#e3f2fd', border: '#1565c0', text: '#1565c0', label: 'Placeholder' },
   ACTIVE:     { bg: '#e8f5e9', border: '#2e7d32', text: '#2e7d32', label: 'Active' },
   REPORTING:  { bg: '#fff3e0', border: '#e65100', text: '#e65100', label: 'Reporting' },
-  REVIEW:     { bg: '#fce4ec', border: '#c62828', text: '#c62828', label: 'Review' },
+  REVIEW:     { bg: '#fce4ec', border: '#c62828', text: '#c62828', label: 'Client Review' },
   COMPLETED:  { bg: '#f5f5f5', border: '#616161', text: '#616161', label: 'Completed' },
-  ON_HOLD:    { bg: '#fffde7', border: '#f57f17', text: '#f57f17', label: 'On Hold' },
+  ON_HOLD:    { bg: '#fffde7', border: '#f57f17', text: '#f57f17', label: 'Delayed' },
   CANCELLED:  { bg: '#efebe9', border: '#4e342e', text: '#4e342e', label: 'Cancelled' },
 };
 
@@ -327,6 +327,26 @@ function TeamEngBlock({ engagement, onClick, onDragStart, onPointerDown, isDragg
         📋 {engagement.name}
       </Typography>
       <Typography sx={{ fontSize: '0.65rem', opacity: 0.8, pointerEvents: 'none' }}>{s.label}</Typography>
+      {engagement.project_manager_name && (
+        <Box sx={{
+          mt: 0.45,
+          px: 0.6,
+          py: 0.25,
+          borderRadius: '3px',
+          bgcolor: 'rgba(255,255,255,0.62)',
+          border: `1px solid ${s.border}35`,
+          color: s.text,
+          fontSize: '0.62rem',
+          fontWeight: 700,
+          lineHeight: 1.25,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+        }}>
+          PM: {engagement.project_manager_name}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -978,7 +998,6 @@ const handleDeleteEvent = async (id) => {
       setEngagements(prev => prev.map(e => e.id !== engId ? e : {
         ...e,
         lead_pentester: null,
-        project_manager: null,
         team_members: [],
       }));
       setSnack(`"${name}" returned to unassigned pool`);
@@ -986,7 +1005,6 @@ const handleDeleteEvent = async (id) => {
       try {
         const res = await api.patch(`/engagements/${engId}/`, {
           lead_pentester: null,
-          project_manager: null,
           team_members: [],
         });
         setEngagements(prev => prev.map(e => e.id !== engId ? e : res.data));
@@ -1205,6 +1223,22 @@ const handleDeleteEvent = async (id) => {
     } catch (e) { console.error(e); setSnack('Failed to unassign from engagement.'); fetchEngagements(); }
   };
 
+  const handleUpdateEngagementPM = async (eng, projectManagerId) => {
+    if (!eng) return;
+    const normalizedId = projectManagerId ? parseInt(projectManagerId, 10) : null;
+    try {
+      const res = await api.patch(`/engagements/${eng.id}/`, { project_manager: normalizedId });
+      setEngagements(prev => prev.map(e => e.id !== eng.id ? e : res.data));
+      setEngDlg(res.data);
+      setSnack(normalizedId ? 'Project manager updated' : 'Project manager removed');
+      dispatchAssignment();
+    } catch (e) {
+      console.error(e);
+      setSnack('Failed to update project manager.');
+      fetchEngagements();
+    }
+  };
+
   const handleEngagementPointerDown = (engagement, sourceMember, event) => {
     if (event.button !== 0) return;
     const startX = event.clientX;
@@ -1382,7 +1416,6 @@ const handleDeleteEvent = async (id) => {
   const unassignedEngagements = useMemo(() =>
     engagements.filter(eng =>
       !eng.lead_pentester &&
-      !eng.project_manager &&
       !(eng.team_members || []).length
     ),
     [engagements]
@@ -1452,7 +1485,7 @@ const handleDeleteEvent = async (id) => {
         map[`${member.id}:${ds}`] = {
           engs: filteredEngagements.filter(eng => {
             if (eng.skip_weekends && (dow === 0 || dow === 6)) return false;
-            const inTeam = sameId(eng.lead_pentester, member.id) || sameId(eng.project_manager, member.id) ||
+            const inTeam = sameId(eng.lead_pentester, member.id) ||
                            hasId(eng.team_members, member.id);
             return inTeam && eng.start_date && eng.end_date && ds >= eng.start_date && ds <= eng.end_date;
           }),
@@ -3103,6 +3136,36 @@ const handleDeleteEvent = async (id) => {
                       </Box>
                     </Box>
                   )}
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" fontWeight={700}>PROJECT MANAGER</Typography>
+                    {isAdmin ? (
+                      <Box sx={{ display: 'flex', gap: 1, mt: 0.5, alignItems: 'center' }}>
+                        <TextField
+                          select
+                          size="small"
+                          value={engDlg.project_manager || ''}
+                          onChange={(e) => handleUpdateEngagementPM(engDlg, e.target.value)}
+                          sx={{ flex: 1 }}
+                        >
+                          <MenuItem value=""><em>No project manager</em></MenuItem>
+                          {members
+                            .filter(m => ['PROJECT_MANAGER', 'PENTESTER', 'ADMIN', 'SUPERADMIN'].includes(m.role))
+                            .map(m => (
+                              <MenuItem key={m.id} value={m.id}>{m.first_name} {m.last_name}</MenuItem>
+                            ))}
+                        </TextField>
+                        {engDlg.project_manager && (
+                          <Button size="small" color="error" onClick={() => handleUpdateEngagementPM(engDlg, '')}>
+                            Remove
+                          </Button>
+                        )}
+                      </Box>
+                    ) : (
+                      <Typography variant="body2" fontWeight={600} sx={{ mt: 0.3 }}>
+                        {engDlg.project_manager_name || 'No project manager'}
+                      </Typography>
+                    )}
+                  </Box>
                   {engDlg.team_members_details?.length > 0 && (
                     <Box>
                       <Typography variant="caption" color="text.secondary" fontWeight={700}>TEAM</Typography>
