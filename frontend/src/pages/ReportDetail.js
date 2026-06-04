@@ -148,6 +148,37 @@ const TYPE_PREFIXES = {
   __untagged__: 'FIN',
 };
 
+const inferPentestTypeFromTemplate = (template = {}) => {
+  const folder = (template.folder_name || '').toLowerCase();
+  const category = template.category || '';
+
+  if (folder.includes('web application')) return 'WEB_APP';
+  if (folder.includes('active directory') || folder === 'network') return 'INTERNAL';
+  if (folder.includes('api')) return 'API';
+  if (folder.includes('cloud')) return 'CLOUD';
+  if (folder.includes('wireless')) return 'WIRELESS';
+  if (folder.includes('physical')) return 'PHYSICAL';
+  if (folder.includes('social')) return 'SOCIAL_ENG';
+  if (folder.includes('authentication') || folder.includes('session')) return 'WEB_APP';
+
+  const categoryMap = {
+    WEB: 'WEB_APP',
+    INPUT: 'WEB_APP',
+    ACCESS: 'WEB_APP',
+    SESSION: 'WEB_APP',
+    AUTH: 'WEB_APP',
+    API: 'API',
+    NETWORK: 'INTERNAL',
+    CLOUD: 'CLOUD',
+    MOBILE: 'MOBILE',
+    WIRELESS: 'WIRELESS',
+    PHYSICAL: 'PHYSICAL',
+    SOCIAL: 'SOCIAL_ENG',
+  };
+
+  return categoryMap[category] || 'OTHER';
+};
+
 const TOGGLEABLE_COLS = [
   { key: 'affected_asset', label: 'Affected Asset' },
   { key: 'severity',       label: 'Severity' },
@@ -622,6 +653,7 @@ const ReportDetail = () => {
           title: t.title,
           severity: t.default_severity,
           status: 'DRAFT',
+          pentest_type: inferPentestTypeFromTemplate(t),
           description: t.description || '',
           details: t.details || '',
           impact: t.impact || '',

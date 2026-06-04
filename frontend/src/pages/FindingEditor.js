@@ -33,6 +33,37 @@ const PENTEST_TYPES = [
   { value: 'OTHER',      label: 'Other' },
 ];
 
+const inferPentestTypeFromTemplate = (template = {}) => {
+  const folder = (template.folder_name || '').toLowerCase();
+  const category = template.category || '';
+
+  if (folder.includes('web application')) return 'WEB_APP';
+  if (folder.includes('active directory') || folder === 'network') return 'INTERNAL';
+  if (folder.includes('api')) return 'API';
+  if (folder.includes('cloud')) return 'CLOUD';
+  if (folder.includes('wireless')) return 'WIRELESS';
+  if (folder.includes('physical')) return 'PHYSICAL';
+  if (folder.includes('social')) return 'SOCIAL_ENG';
+  if (folder.includes('authentication') || folder.includes('session')) return 'WEB_APP';
+
+  const categoryMap = {
+    WEB: 'WEB_APP',
+    INPUT: 'WEB_APP',
+    ACCESS: 'WEB_APP',
+    SESSION: 'WEB_APP',
+    AUTH: 'WEB_APP',
+    API: 'API',
+    NETWORK: 'INTERNAL',
+    CLOUD: 'CLOUD',
+    MOBILE: 'MOBILE',
+    WIRELESS: 'WIRELESS',
+    PHYSICAL: 'PHYSICAL',
+    SOCIAL: 'SOCIAL_ENG',
+  };
+
+  return categoryMap[category] || 'OTHER';
+};
+
 // Risk matrix: likelihood x impact → severity
 const RISK_MATRIX = {
   HIGH:   { HIGH: 'CRITICAL', MEDIUM: 'MEDIUM', LOW: 'LOW' },
@@ -467,6 +498,7 @@ const FindingEditor = () => {
       ...prev,
       title:    prev.title || tmpl.title,
       severity: tmpl.default_severity || prev.severity,
+      pentest_type: prev.pentest_type || inferPentestTypeFromTemplate(tmpl),
       cwe_id:   tmpl.cwe_id || prev.cwe_id,
     }));
     // Push plain-text content into Quill editors (only fills empty fields)
