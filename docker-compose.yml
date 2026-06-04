@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: ozireport-db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: ozireport
+      POSTGRES_USER: ozireport
+      POSTGRES_PASSWORD: ozireport_secret_password
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ozireport"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    container_name: ozireport-backend
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgres://ozireport:ozireport_secret_password@db:5432/ozireport
+      - SECRET_KEY=dev-secret-key-change-in-production
+      - GOOGLE_CLIENT_ID=your-google-client-id
+      - GOOGLE_CLIENT_SECRET=your-google-client-secret
+      - FRONTEND_URL=http://localhost:3000
+      # Integrations work locally. Use a tunnel only for inbound callbacks/webhooks.
+      - PUBLIC_BASE_URL=http://localhost:8000
+      - EMAIL_HOST=smtp.gmail.com
+      - EMAIL_PORT=587
+      - EMAIL_HOST_USER=
+      - EMAIL_HOST_PASSWORD=
+      - EMAIL_USE_TLS=True
+      # AI: set AI_PROVIDER=ollama (local/free) or AI_PROVIDER=gemini with GEMINI_API_KEY
+      - AI_PROVIDER=ollama
+      - OLLAMA_URL=http://ollama:11434
+      - OLLAMA_MODEL=mistral
+      - GEMINI_API_KEY=
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    container_name: ozireport-frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+  # ── Local AI (Ollama) ──────────────────────────────────────────────────────
+  # Runs a local LLM — no API key, no cost, data stays on your machine.
+  # First-time setup: docker exec ozireport-ollama ollama pull mistral
+  # Swap model: change OLLAMA_MODEL in backend env above (e.g. llama3.2:3b for lighter/faster)
+  ollama:
+    image: ollama/ollama
+    container_name: ozireport-ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  ollama_data:
