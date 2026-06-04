@@ -51,7 +51,6 @@ services:
     name: mainframe-web
     runtime: static
     rootDir: frontend
-    plan: starter
     buildCommand: npm ci && npm run build
     staticPublishPath: build
     envVars:
