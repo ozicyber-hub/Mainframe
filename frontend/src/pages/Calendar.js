@@ -293,13 +293,19 @@ function TeamEngBlock({ engagement, onClick, onDragStart, isDragging }) {
   const s = ENG_STATUS[engagement.status] || ENG_STATUS.PLANNING;
   return (
     <Box
-      draggable
+      component="div"
+      draggable="true"
       onDragStart={(e) => {
+        e.stopPropagation();
+        try { e.dataTransfer.clearData(); } catch {}
         e.dataTransfer.setData('text/plain', String(engagement.id));
         e.dataTransfer.effectAllowed = 'move';
-        onDragStart(engagement);
+        onDragStart(engagement, e);
       }}
-      onClick={() => onClick(engagement)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick(engagement);
+      }}
       sx={{
         bgcolor: s.bg, color: s.text,
         border: `1px solid ${s.border}80`,
@@ -309,6 +315,8 @@ function TeamEngBlock({ engagement, onClick, onDragStart, isDragging }) {
         opacity: isDragging ? 0.4 : 1,
         userSelect: 'none',
         WebkitUserSelect: 'none',
+        touchAction: 'none',
+        '& *': { pointerEvents: 'none' },
         '&:hover': { opacity: isDragging ? 0.4 : 0.85, boxShadow: 1 },
         '&:active': { cursor: 'grabbing' },
       }}>
@@ -511,6 +519,48 @@ export default function Calendar() {
   const dragSourceMemberRef = useRef(null);
   const dragGrcRef   = useRef(null); // mirrors dragGrcAssessment but always current (no stale closure)
   const dragGrcProjectRef = useRef(null);
+
+  const beginEngagementDrag = useCallback((engagement, sourceMember, event) => {
+    if (event?.dataTransfer) {
+      try { event.dataTransfer.clearData(); } catch {}
+      event.dataTransfer.setData('text/plain', String(engagement.id));
+      event.dataTransfer.setData('application/x-ozireport-engagement', String(engagement.id));
+      if (sourceMember?.id != null) {
+        event.dataTransfer.setData('application/x-ozireport-source-member', String(sourceMember.id));
+      }
+      event.dataTransfer.effectAllowed = 'move';
+    }
+    dragEngRef.current = engagement;
+    dragSourceMemberRef.current = sourceMember || null;
+    dragGrcRef.current = null;
+    dragGrcProjectRef.current = null;
+    setDragEng(engagement);
+    setDragSourceMember(sourceMember || null);
+    setDragTask(null);
+    setDragGridEvent(null);
+    setDragPoolEvent(null);
+    setDragGrcAssessment(null);
+    setDragGrcProject(null);
+    setDragOverMember(null);
+    setDragOverDay(null);
+  }, []);
+
+  const getNativeEngagementDrag = useCallback((event) => {
+    const dataTransfer = event?.dataTransfer;
+    if (!dataTransfer) return { engagement: null, sourceMember: null };
+    const engagementId = dataTransfer.getData('application/x-ozireport-engagement') || dataTransfer.getData('text/plain');
+    const sourceMemberId = dataTransfer.getData('application/x-ozireport-source-member');
+    const engagement = engagementId
+      ? engagements.find(item => sameId(item.id, engagementId)) || null
+      : null;
+    const sourceMember = sourceMemberId
+      ? members.find(item => sameId(item.id, sourceMemberId)) || null
+      : null;
+    return { engagement, sourceMember };
+  }, [engagements, members]);
+
+  const hasNativeEngagementDrag = (event) =>
+    Array.from(event?.dataTransfer?.types || []).includes('application/x-ozireport-engagement');
 
   // Task view
   const [taskViewMode,   setTaskViewMode]   = useState('board');
@@ -1249,8 +1299,9 @@ const handleDeleteEvent = async (id) => {
 
   // Projected date range shown as ghost-highlight when dragging
   const projectedRange = useMemo(() => {
-    if (!dragEng || !dragOverDay || !dragOverMember) return null;
-    return shiftEngagementDates(dragEng, dayjs(dragOverDay));
+    const currentDragEng = dragEng || dragEngRef.current;
+    if (!currentDragEng || !dragOverDay || !dragOverMember) return null;
+    return shiftEngagementDates(currentDragEng, dayjs(dragOverDay));
   }, [dragEng, dragOverDay, dragOverMember]);
 
   const pendingRequests = requests.filter(r => r.status === 'PENDING');
@@ -1601,7 +1652,7 @@ const handleDeleteEvent = async (id) => {
                       return (
                         <td key={cellDate}
                           onDragOver={(e) => {
-                            if (currentDragEng || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
+                            if (currentDragEng || hasNativeEngagementDrag(e) || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
                               e.preventDefault();
                               if (!sameId(dragOverRef.current.member, member.id) || dragOverRef.current.day !== cellDate) {
                                 dragOverRef.current = { member: member.id, day: cellDate };
@@ -1620,8 +1671,9 @@ const handleDeleteEvent = async (id) => {
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
-                            const dropEng = dragEng || dragEngRef.current;
-                            const dropSourceMember = dragSourceMember || dragSourceMemberRef.current;
+                            const nativeDrag = getNativeEngagementDrag(e);
+                            const dropEng = dragEng || dragEngRef.current || nativeDrag.engagement;
+                            const dropSourceMember = dragSourceMember || dragSourceMemberRef.current || nativeDrag.sourceMember;
                             if (dropEng && dropSourceMember && !sameId(member.id, dropSourceMember.id)) {
                               setReassignDlg({ engagement: dropEng, targetMember: member, sourceMember: dropSourceMember, targetDay: day });
                             } else if (dropEng && dropSourceMember && sameId(member.id, dropSourceMember.id) && day.format('YYYY-MM-DD') !== dropEng.start_date) {
@@ -1686,12 +1738,7 @@ const handleDeleteEvent = async (id) => {
                               key={`eng-${eng.id}`}
                               engagement={eng}
                               onClick={() => openEngDetail(eng, member)}
-                              onDragStart={(e) => {
-                                dragEngRef.current = e;
-                                dragSourceMemberRef.current = member;
-                                setDragEng(e);
-                                setDragSourceMember(member);
-                              }}
+                              onDragStart={(engagement, event) => beginEngagementDrag(engagement, member, event)}
                               isDragging={(dragEng || dragEngRef.current)?.id === eng.id}
                             />
                           ))}
@@ -1760,7 +1807,7 @@ const handleDeleteEvent = async (id) => {
       {viewMode === 'team' && !isClient && (
         <Paper
           onDragOver={(e) => {
-            if ((dragSourceMember || dragSourceMemberRef.current) && (dragEng || dragEngRef.current || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
+            if ((dragSourceMember || dragSourceMemberRef.current || hasNativeEngagementDrag(e)) && (dragEng || dragEngRef.current || hasNativeEngagementDrag(e) || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
               e.preventDefault();
               setDraggingOverPool(true);
             }
@@ -1769,7 +1816,13 @@ const handleDeleteEvent = async (id) => {
             // Only clear if leaving the Paper entirely (not entering a child)
             if (!e.currentTarget.contains(e.relatedTarget)) setDraggingOverPool(false);
           }}
-          onDrop={(e) => { e.preventDefault(); handleReturnToPool(); }}
+          onDrop={(e) => {
+            e.preventDefault();
+            const nativeDrag = getNativeEngagementDrag(e);
+            if (nativeDrag.engagement) dragEngRef.current = nativeDrag.engagement;
+            if (nativeDrag.sourceMember) dragSourceMemberRef.current = nativeDrag.sourceMember;
+            handleReturnToPool();
+          }}
           sx={{
             p: 2, mb: 3,
             outline: draggingOverPool ? `3px dashed ${theme.palette.primary.main}` : 'none',
@@ -1823,12 +1876,7 @@ const handleDeleteEvent = async (id) => {
                     <Box
                       key={eng.id}
                       draggable
-                      onDragStart={() => {
-                        dragEngRef.current = eng;
-                        dragSourceMemberRef.current = null;
-                        setDragEng(eng);
-                        setDragSourceMember(null);
-                      }}
+                      onDragStart={(event) => beginEngagementDrag(eng, null, event)}
                       onDragEnd={() => {
                         dragEngRef.current = null;
                         dragSourceMemberRef.current = null;
