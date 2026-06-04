@@ -45,9 +45,9 @@ class GrcProjectViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         user = self.request.user
         if getattr(user, 'is_superuser', False) or getattr(user, 'role', '') in ('SUPERADMIN', 'ADMIN'):
-            return GrcProject.objects.select_related('framework').all()
-        return GrcProject.objects.select_related('framework').filter(
-            Q(organization__users=user) | Q(created_by=user)
+            return GrcProject.objects.select_related('framework', 'assessor', 'created_by').all()
+        return GrcProject.objects.select_related('framework', 'assessor', 'created_by').filter(
+            Q(organization__users=user) | Q(created_by=user) | Q(assessor=user)
         ).distinct()
 
     def perform_create(self, serializer):

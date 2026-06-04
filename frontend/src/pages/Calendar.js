@@ -31,6 +31,12 @@ const GRC_STATUS = {
   ARCHIVED:    { bg: '#f5f5f5', border: '#6b7280', text: '#374151', label: 'Archived' },
 };
 
+const GRC_PROJECT_STATUS = {
+  ACTIVE:    { bg: '#e0f2fe', border: '#0284c7', text: '#075985', label: 'Active' },
+  COMPLETED: { bg: '#ecfdf5', border: '#059669', text: '#065f46', label: 'Completed' },
+  ARCHIVED:  { bg: '#f5f5f5', border: '#6b7280', text: '#374151', label: 'Archived' },
+};
+
 const EVENT_COLORS = {
   ENGAGEMENT_START:   '#24483E',
   ENGAGEMENT_END:     '#c0392b',
@@ -124,6 +130,11 @@ function weekDays(weekStart) {
   return Array.from({ length: 7 }, (_, i) => weekStart.add(i, 'day'));
 }
 
+const sameId = (a, b) => Number(a) === Number(b);
+const hasId = (items = [], id) => items.some(item => sameId(item, id));
+const withoutId = (items = [], id) => items.filter(item => !sameId(item, id));
+const getGrcConsultantId = (assessment) => assessment?.grc_consultant_id ?? assessment?.grc_consultant ?? null;
+
 // ─── Sub-components ──────────────────────────────────────────────────────────
 function EventChip({ event, onClick }) {
   const color = EVENT_COLORS[event.event_type] || '#7b1fa2';
@@ -200,7 +211,6 @@ function GrcAssessmentChip({ assessment, onClick, onDragStart, isDragging }) {
     <div
       draggable="true"
       onDragStart={(e) => {
-        console.log('[GRC CHIP] dragstart fired for:', assessment.title);
         e.dataTransfer.setData('text/plain', String(assessment.id));
         e.dataTransfer.effectAllowed = 'move';
         if (onDragStart) onDragStart(assessment);
@@ -230,6 +240,48 @@ function GrcAssessmentChip({ assessment, onClick, onDragStart, isDragging }) {
         {assessment.grc_consultant_name && (
           <span style={{ fontSize: '0.62rem', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {assessment.grc_consultant_name}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function GrcProjectChip({ project, onClick, onDragStart, isDragging }) {
+  const s = GRC_PROJECT_STATUS[project.status] || GRC_PROJECT_STATUS.ACTIVE;
+  return (
+    <div
+      draggable="true"
+      onDragStart={(e) => {
+        e.dataTransfer.setData('text/plain', `grc-project:${project.id}`);
+        e.dataTransfer.effectAllowed = 'move';
+        if (onDragStart) onDragStart(project);
+      }}
+      onClick={(e) => { e.stopPropagation(); onClick(project); }}
+      style={{
+        background: s.bg,
+        color: s.text,
+        border: `1px solid ${s.border}60`,
+        borderLeft: `3px solid ${s.border}`,
+        borderRadius: '4px',
+        padding: '3px 6px',
+        cursor: onDragStart ? (isDragging ? 'grabbing' : 'grab') : 'pointer',
+        opacity: isDragging ? 0.4 : 1,
+        marginBottom: 3,
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+      }}
+    >
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+        GRC Project · {project.title}
+      </div>
+      <div style={{ display: 'flex', gap: 4, marginTop: 2, alignItems: 'center', pointerEvents: 'none' }}>
+        <span style={{ fontSize: '0.62rem', fontWeight: 600, background: s.border + '20', color: s.text, padding: '0 4px', borderRadius: '2px' }}>
+          {s.label}
+        </span>
+        {project.assessor_name && (
+          <span style={{ fontSize: '0.62rem', opacity: 0.75, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {project.assessor_name}
           </span>
         )}
       </div>
@@ -405,6 +457,7 @@ export default function Calendar() {
   const [requests,        setRequests]        = useState([]);
   const [engagements,     setEngagements]     = useState([]);
   const [grcAssessments,  setGrcAssessments]  = useState([]);
+  const [grcProjects,     setGrcProjects]     = useState([]);
   const [members,         setMembers]         = useState([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -441,6 +494,7 @@ export default function Calendar() {
   const [dragTask,            setDragTask]            = useState(null);
   const [dragGridEvent,       setDragGridEvent]       = useState(null);
   const [dragGrcAssessment,   setDragGrcAssessment]   = useState(null);
+  const [dragGrcProject,      setDragGrcProject]      = useState(null);
   const [dragSourceMember,    setDragSourceMember]    = useState(null);
   const [dragOverMember,   setDragOverMember]   = useState(null);
   const [dragOverDay,      setDragOverDay]      = useState(null); // 'YYYY-MM-DD'
@@ -454,6 +508,7 @@ export default function Calendar() {
 
   const dragOverRef  = useRef({ member: null, day: null });
   const dragGrcRef   = useRef(null); // mirrors dragGrcAssessment but always current (no stale closure)
+  const dragGrcProjectRef = useRef(null);
 
   // Task view
   const [taskViewMode,   setTaskViewMode]   = useState('board');
@@ -522,6 +577,13 @@ export default function Calendar() {
     } catch (e) { console.error('GRC assessment fetch error', e); }
   }, [viewMode, startOfMonth, endOfMonth, weekStart]);
 
+  const fetchGrcProjects = useCallback(async () => {
+    try {
+      const res = await api.get('/grc/projects/');
+      setGrcProjects(res.data.results || res.data);
+    } catch (e) { console.error('GRC project fetch error', e); }
+  }, []);
+
   const fetchTasks = useCallback(async () => {
     try {
       const res = await api.get('/scheduling/tasks/');
@@ -539,7 +601,7 @@ export default function Calendar() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([fetchEvents(), fetchEngagements(), fetchGrcAssessments()]);
+      await Promise.all([fetchEvents(), fetchEngagements(), fetchGrcAssessments(), fetchGrcProjects()]);
       if (!isClient) {
         await Promise.all([fetchTasks(), fetchRequests()]);
         try {
@@ -551,7 +613,7 @@ export default function Calendar() {
       }
     } catch (e) { console.error('Calendar fetch error', e); }
     setLoading(false);
-  }, [fetchEvents, fetchEngagements, fetchGrcAssessments, fetchTasks, fetchRequests, isClient]);
+  }, [fetchEvents, fetchEngagements, fetchGrcAssessments, fetchGrcProjects, fetchTasks, fetchRequests, isClient]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -569,11 +631,11 @@ export default function Calendar() {
     if (filterType && ev.event_type !== filterType) return false;
     if (filterUser) {
       const uid = parseInt(filterUser);
-      const isAtt = ev.attendees_detail?.some(a => a.id === uid) || ev.created_by === uid;
+      const isAtt = ev.attendees_detail?.some(a => sameId(a.id, uid)) || sameId(ev.created_by, uid);
       if (!isAtt) return false;
     }
     if (mineOnly) {
-      const isAtt = ev.attendees_detail?.some(a => Number(a.id) === myUserId) || Number(ev.created_by) === myUserId;
+      const isAtt = ev.attendees_detail?.some(a => sameId(a.id, myUserId)) || sameId(ev.created_by, myUserId);
       if (!isAtt) return false;
     }
     return true;
@@ -583,13 +645,13 @@ export default function Calendar() {
     if (searchQ && !eng.name.toLowerCase().includes(searchQ.toLowerCase())) return false;
     if (filterUser) {
       const uid = parseInt(filterUser);
-      const inTeam = eng.lead_pentester === uid || eng.project_manager === uid ||
-                     (eng.team_members || []).includes(uid);
+      const inTeam = sameId(eng.lead_pentester, uid) || sameId(eng.project_manager, uid) ||
+                     hasId(eng.team_members, uid);
       if (!inTeam) return false;
     }
     if (mineOnly) {
-      const inTeam = Number(eng.lead_pentester) === myUserId || Number(eng.project_manager) === myUserId ||
-                     (eng.team_members || []).some(id => Number(id) === myUserId);
+      const inTeam = sameId(eng.lead_pentester, myUserId) || sameId(eng.project_manager, myUserId) ||
+                     hasId(eng.team_members, myUserId);
       if (!inTeam) return false;
     }
     return true;
@@ -622,14 +684,20 @@ export default function Calendar() {
     return grcAssessments.filter(a => a.start_date && a.end_date && ds >= a.start_date && ds <= a.end_date);
   };
 
+  const grcProjectsOnDay = (d) => {
+    if (!d) return [];
+    const ds = d.format('YYYY-MM-DD');
+    return grcProjects.filter(p => p.assessor && p.target_date === ds);
+  };
+
   // ── Team view helpers ─────────────────────────────────────────────────────
   const engagementsForMemberDay = (member, day) => {
     const ds  = day.format('YYYY-MM-DD');
     const dow = day.day();
     return filteredEngagements.filter(eng => {
       if (eng.skip_weekends && (dow === 0 || dow === 6)) return false;
-      const inTeam = eng.lead_pentester === member.id || eng.project_manager === member.id ||
-                     (eng.team_members || []).includes(member.id);
+      const inTeam = sameId(eng.lead_pentester, member.id) || sameId(eng.project_manager, member.id) ||
+                     hasId(eng.team_members, member.id);
       return inTeam && eng.start_date && eng.end_date && ds >= eng.start_date && ds <= eng.end_date;
     });
   };
@@ -639,7 +707,7 @@ export default function Calendar() {
     return filteredEvents.filter(ev => {
       // Only show in team rows based on attendees — not created_by.
       // Events show in pool if unlinked; created_by alone isn't enough to put them on someone's row.
-      const isAtt = ev.attendees_detail?.some(a => a.id === member.id);
+      const isAtt = ev.attendees_detail?.some(a => sameId(a.id, member.id));
       const s = ev.start_date?.slice(0, 10);
       const e = ev.end_date?.slice(0, 10);
       return isAtt && s && e && ds >= s && ds <= e;
@@ -649,7 +717,7 @@ export default function Calendar() {
   const tasksForMemberDay = (member, day) => {
     const ds = day.format('YYYY-MM-DD');
     return tasks.filter(t =>
-      t.assigned_to === member.id && t.due_date === ds && t.status !== 'DONE'
+      sameId(t.assigned_to, member.id) && t.due_date === ds && t.status !== 'DONE'
     );
   };
 
@@ -745,19 +813,23 @@ const handleDeleteEvent = async (id) => {
         updated.start_date = new_start_date; updated.end_date = new_end_date;
       }
       if (sourceMember) {
-        if (updated.lead_pentester === sourceMember.id) {
+        if (sameId(updated.lead_pentester, sourceMember.id)) {
           updated.lead_pentester = targetMember.id;
           // Mirror backend: remove source AND target from team_members (target is now lead, not a member)
           updated.team_members = (updated.team_members || []).filter(
-            id => id !== sourceMember.id && id !== targetMember.id
+            id => !sameId(id, sourceMember.id) && !sameId(id, targetMember.id)
           );
+        } else if (sameId(updated.project_manager, sourceMember.id)) {
+          updated.project_manager = targetMember.id;
         } else {
-          updated.team_members = [...(updated.team_members || []).filter(id => id !== sourceMember.id), targetMember.id];
+          updated.team_members = hasId(updated.team_members, targetMember.id)
+            ? withoutId(updated.team_members, sourceMember.id)
+            : [...withoutId(updated.team_members, sourceMember.id), targetMember.id];
         }
       } else {
         updated.lead_pentester = targetMember.id;
         // Remove target from team_members — they're now the lead
-        updated.team_members = (updated.team_members || []).filter(id => id !== targetMember.id);
+        updated.team_members = withoutId(updated.team_members, targetMember.id);
       }
       return updated;
     }));
@@ -767,7 +839,8 @@ const handleDeleteEvent = async (id) => {
     try {
       const payload = { source_id: sourceMember?.id, target_id: targetMember.id };
       if (targetDay) Object.assign(payload, shiftEngagementDates(engagement, targetDay));
-      await api.post(`/engagements/${engagement.id}/reassign/`, payload);
+      const res = await api.post(`/engagements/${engagement.id}/reassign/`, payload);
+      setEngagements(prev => prev.map(e => e.id !== engagement.id ? e : res.data));
       dispatchAssignment();
     } catch (e) { console.error(e); setSnack('Failed to reassign engagement.'); fetchEngagements(); }
   };
@@ -811,11 +884,24 @@ const handleDeleteEvent = async (id) => {
     const clearDrag = () => {
       dragOverRef.current = { member: null, day: null };
       dragGrcRef.current = null;
-      setDragEng(null); setDragTask(null); setDragGridEvent(null); setDragGrcAssessment(null);
+      dragGrcProjectRef.current = null;
+      setDragEng(null); setDragTask(null); setDragGridEvent(null); setDragGrcAssessment(null); setDragGrcProject(null);
       setDragSourceMember(null); setDragOverMember(null); setDragOverDay(null);
       setDraggingOverPool(false);
     };
-    if (dragGrcAssessment || dragGrcRef.current) {
+    if (dragGrcProject || dragGrcProjectRef.current) {
+      const p = dragGrcProject || dragGrcProjectRef.current;
+      setGrcProjects(prev => prev.map(project => project.id !== p.id ? project : {
+        ...project, assessor: null, assessor_name: null,
+      }));
+      setSnack(`"${p.title}" returned to unassigned pool`);
+      clearDrag();
+      try {
+        const res = await api.patch(`/grc/projects/${p.id}/`, { assessor: null });
+        setGrcProjects(prev => prev.map(project => project.id !== p.id ? project : res.data));
+      }
+      catch (e) { console.error(e); setSnack('Failed.'); fetchGrcProjects(); }
+    } else if (dragGrcAssessment || dragGrcRef.current) {
       const a = dragGrcAssessment || dragGrcRef.current;
       setGrcAssessments(prev => prev.map(g => g.id !== a.id ? g : {
         ...g, grc_consultant_id: null, grc_consultant_name: null,
@@ -828,12 +914,17 @@ const handleDeleteEvent = async (id) => {
       const { id: engId, name } = dragEng; const srcId = dragSourceMember.id;
       setEngagements(prev => prev.map(e => e.id !== engId ? e : {
         ...e,
-        lead_pentester: e.lead_pentester === srcId ? null : e.lead_pentester,
-        team_members: (e.team_members || []).filter(id => id !== srcId),
+        lead_pentester: sameId(e.lead_pentester, srcId) ? null : e.lead_pentester,
+        project_manager: sameId(e.project_manager, srcId) ? null : e.project_manager,
+        team_members: withoutId(e.team_members, srcId),
       }));
       setSnack(`"${name}" returned to unassigned pool`);
       clearDrag();
-      try { await api.post(`/engagements/${engId}/remove_member/`, { member_id: srcId }); dispatchAssignment(); }
+      try {
+        const res = await api.post(`/engagements/${engId}/remove_member/`, { member_id: srcId });
+        setEngagements(prev => prev.map(e => e.id !== engId ? e : res.data));
+        dispatchAssignment();
+      }
       catch (e) { console.error(e); setSnack('Failed.'); fetchEngagements(); }
     } else if (dragTask && dragSourceMember) {
       const taskId = dragTask.id;
@@ -844,9 +935,9 @@ const handleDeleteEvent = async (id) => {
       catch (e) { console.error(e); setSnack('Failed.'); fetchTasks(); }
     } else if (dragGridEvent && dragSourceMember) {
       const srcId = dragSourceMember.id; const evId = dragGridEvent.id;
-      const remainingIds = (dragGridEvent.attendees_detail || []).map(a => a.id).filter(id => id !== srcId);
+      const remainingIds = (dragGridEvent.attendees_detail || []).map(a => a.id).filter(id => !sameId(id, srcId));
       setEvents(prev => prev.map(ev => ev.id !== evId ? ev : {
-        ...ev, attendees_detail: (ev.attendees_detail || []).filter(a => a.id !== srcId),
+        ...ev, attendees_detail: (ev.attendees_detail || []).filter(a => !sameId(a.id, srcId)),
       }));
       setSnack('Event returned to unassigned pool');
       clearDrag();
@@ -891,9 +982,29 @@ const handleDeleteEvent = async (id) => {
     catch (e) { console.error(e); setSnack('Failed to assign GRC assessment.'); fetchGrcAssessments(); }
   };
 
+  const handleAssignGrcProjectFromPool = async (project, member, targetDay) => {
+    const dateUpdate = targetDay ? { target_date: targetDay.format('YYYY-MM-DD') } : {};
+    const patchData = { assessor: member.id, ...dateUpdate };
+    setGrcProjects(prev => prev.map(p => p.id !== project.id ? p : {
+      ...p,
+      assessor: member.id,
+      assessor_name: `${member.first_name} ${member.last_name}`,
+      ...dateUpdate,
+    }));
+    setSnack(`"${project.title}" assigned to ${member.first_name} ${member.last_name}`);
+    setDragGrcProject(null); setDragSourceMember(null); setDragOverMember(null); setDragOverDay(null);
+    dragOverRef.current = { member: null, day: null };
+    dragGrcProjectRef.current = null;
+    try {
+      const res = await api.patch(`/grc/projects/${project.id}/`, patchData);
+      setGrcProjects(prev => prev.map(p => p.id !== project.id ? p : res.data));
+    }
+    catch (e) { console.error(e); setSnack('Failed to assign GRC project.'); fetchGrcProjects(); }
+  };
+
   const handleGrcReassign = async () => {
     if (!grcReassignDlg) return;
-    const { assessment, targetMember, sourceMember, targetDay } = grcReassignDlg;
+    const { assessment, targetMember, targetDay } = grcReassignDlg;
     const isReplace = grcReassignMode === 'replace';
     if (isReplace) {
       await handleAssignGrcFromPool(assessment, targetMember, targetDay);
@@ -930,13 +1041,13 @@ const handleDeleteEvent = async (id) => {
     const newEnd   = newStart.add(durationMin, 'minute');
     const existingIds = (event.attendees_detail || []).map(a => a.id);
     const srcMember = dragSourceMember;
-    const withoutSource = srcMember ? existingIds.filter(id => id !== srcMember.id) : existingIds;
-    const newIds = withoutSource.includes(targetMember.id) ? withoutSource : [...withoutSource, targetMember.id];
+    const withoutSource = srcMember ? withoutId(existingIds, srcMember.id) : existingIds;
+    const newIds = hasId(withoutSource, targetMember.id) ? withoutSource : [...withoutSource, targetMember.id];
     setEvents(prev => prev.map(ev => ev.id !== event.id ? ev : {
       ...ev,
       attendees_detail: [
-        ...(ev.attendees_detail || []).filter(a => a.id !== srcMember?.id),
-        ...(ev.attendees_detail?.some(a => a.id === targetMember.id) ? [] : [targetMember]),
+        ...(ev.attendees_detail || []).filter(a => !sameId(a.id, srcMember?.id)),
+        ...(ev.attendees_detail?.some(a => sameId(a.id, targetMember.id)) ? [] : [targetMember]),
       ],
       start_date: newStart.format('YYYY-MM-DDTHH:mm:ss'),
       end_date:   newEnd.format('YYYY-MM-DDTHH:mm:ss'),
@@ -964,7 +1075,7 @@ const handleDeleteEvent = async (id) => {
         const { new_start_date, new_end_date } = shiftEngagementDates(engagement, targetDay);
         updated.start_date = new_start_date; updated.end_date = new_end_date;
       }
-      if (!updated.team_members?.includes(targetMember.id))
+      if (!hasId(updated.team_members, targetMember.id))
         updated.team_members = [...(updated.team_members || []), targetMember.id];
       return updated;
     }));
@@ -974,7 +1085,8 @@ const handleDeleteEvent = async (id) => {
     try {
       const payload = { add_to_team: true, target_id: targetMember.id };
       if (targetDay) Object.assign(payload, shiftEngagementDates(engagement, targetDay));
-      await api.post(`/engagements/${engagement.id}/reassign/`, payload);
+      const res = await api.post(`/engagements/${engagement.id}/reassign/`, payload);
+      setEngagements(prev => prev.map(e => e.id !== engagement.id ? e : res.data));
       dispatchAssignment();
     } catch (e) { console.error(e); setSnack('Failed to add to team.'); fetchEngagements(); }
   };
@@ -999,7 +1111,8 @@ const handleDeleteEvent = async (id) => {
     try {
       const payload = { target_id: member.id };
       if (targetDay) Object.assign(payload, dates);
-      await api.post(`/engagements/${eng.id}/reassign/`, payload);
+      const res = await api.post(`/engagements/${eng.id}/reassign/`, payload);
+      setEngagements(prev => prev.map(e => e.id !== eng.id ? e : res.data));
       dispatchAssignment();
     } catch (e) { console.error(e); setSnack('Failed to assign engagement.'); fetchEngagements(); }
   };
@@ -1008,13 +1121,15 @@ const handleDeleteEvent = async (id) => {
     if (!eng || !member) return;
     setEngagements(prev => prev.map(e => e.id !== eng.id ? e : {
       ...e,
-      lead_pentester: e.lead_pentester === member.id ? null : e.lead_pentester,
-      team_members: (e.team_members || []).filter(id => id !== member.id),
+      lead_pentester: sameId(e.lead_pentester, member.id) ? null : e.lead_pentester,
+      project_manager: sameId(e.project_manager, member.id) ? null : e.project_manager,
+      team_members: withoutId(e.team_members, member.id),
     }));
     setSnack(`${member.first_name} ${member.last_name} unassigned from "${eng.name}"`);
     setEngDlg(null); setEngDlgMember(null);
     try {
-      await api.post(`/engagements/${eng.id}/remove_member/`, { member_id: member.id });
+      const res = await api.post(`/engagements/${eng.id}/remove_member/`, { member_id: member.id });
+      setEngagements(prev => prev.map(e => e.id !== eng.id ? e : res.data));
       dispatchAssignment();
     } catch (e) { console.error(e); setSnack('Failed to unassign from engagement.'); fetchEngagements(); }
   };
@@ -1109,8 +1224,13 @@ const handleDeleteEvent = async (id) => {
   );
 
   const unassignedGrcAssessments = useMemo(() =>
-    grcAssessments.filter(a => !a.grc_consultant_id),
+    grcAssessments.filter(a => !getGrcConsultantId(a)),
     [grcAssessments]
+  );
+
+  const unassignedGrcProjects = useMemo(() =>
+    grcProjects.filter(p => !p.assessor),
+    [grcProjects]
   );
 
   // Projected date range shown as ghost-highlight when dragging
@@ -1127,7 +1247,7 @@ const handleDeleteEvent = async (id) => {
     .slice(0, 8);
 
   const filteredTasksForView = useMemo(() => tasks.filter(t => {
-    if (mineOnly      && Number(t.assigned_to) !== myUserId) return false;
+    if (mineOnly      && !sameId(t.assigned_to, myUserId)) return false;
     if (taskSearchQ   && !t.title.toLowerCase().includes(taskSearchQ.toLowerCase())) return false;
     if (taskPriorityF && t.priority !== taskPriorityF) return false;
     if (taskAssigneeF && Number(t.assigned_to) !== parseInt(taskAssigneeF)) return false;
@@ -1137,7 +1257,7 @@ const handleDeleteEvent = async (id) => {
   }), [tasks, mineOnly, taskSearchQ, taskPriorityF, taskAssigneeF, taskEngF, taskStatusF, myUserId]);
 
   const taskOverdueCount = useMemo(() => {
-    const base = mineOnly ? tasks.filter(t => Number(t.assigned_to) === myUserId) : tasks;
+    const base = mineOnly ? tasks.filter(t => sameId(t.assigned_to, myUserId)) : tasks;
     return base.filter(t => t.due_date && t.due_date < today.format('YYYY-MM-DD') && t.status !== 'DONE').length;
   }, [tasks, mineOnly, myUserId, today]);
 
@@ -1147,8 +1267,8 @@ const handleDeleteEvent = async (id) => {
   const wDays     = useMemo(() => weekDays(weekStart), [weekStart]);
 
   const displayMembers = useMemo(() => {
-    if (filterUser) return members.filter(m => Number(m.id) === parseInt(filterUser));
-    if (mineOnly)   return members.filter(m => Number(m.id) === myUserId);
+    if (filterUser) return members.filter(m => sameId(m.id, parseInt(filterUser)));
+    if (mineOnly)   return members.filter(m => sameId(m.id, myUserId));
     return members;
   }, [filterUser, mineOnly, members, myUserId]);
 
@@ -1161,28 +1281,31 @@ const handleDeleteEvent = async (id) => {
         map[`${member.id}:${ds}`] = {
           engs: filteredEngagements.filter(eng => {
             if (eng.skip_weekends && (dow === 0 || dow === 6)) return false;
-            const inTeam = eng.lead_pentester === member.id || eng.project_manager === member.id ||
-                           (eng.team_members || []).includes(member.id);
+            const inTeam = sameId(eng.lead_pentester, member.id) || sameId(eng.project_manager, member.id) ||
+                           hasId(eng.team_members, member.id);
             return inTeam && eng.start_date && eng.end_date && ds >= eng.start_date && ds <= eng.end_date;
           }),
           evs: filteredEvents.filter(ev => {
-            const isAtt = ev.attendees_detail?.some(a => a.id === member.id);
+            const isAtt = ev.attendees_detail?.some(a => sameId(a.id, member.id));
             const s = ev.start_date?.slice(0, 10);
             const e = ev.end_date?.slice(0, 10);
             return isAtt && s && e && ds >= s && ds <= e;
           }),
           tasks: tasks.filter(t =>
-            t.assigned_to === member.id && t.due_date === ds && t.status !== 'DONE'
+            sameId(t.assigned_to, member.id) && t.due_date === ds && t.status !== 'DONE'
           ),
           grcs: grcAssessments.filter(a =>
-            a.grc_consultant_id === member.id &&
+            sameId(getGrcConsultantId(a), member.id) &&
             a.start_date && a.end_date && ds >= a.start_date && ds <= a.end_date
+          ),
+          grcProjects: grcProjects.filter(p =>
+            sameId(p.assessor, member.id) && p.target_date === ds
           ),
         };
       }
     }
     return map;
-  }, [filteredEngagements, filteredEvents, tasks, grcAssessments, displayMembers, wDays]);
+  }, [filteredEngagements, filteredEvents, tasks, grcAssessments, grcProjects, displayMembers, wDays]);
 
   return (
     <Box>
@@ -1309,7 +1432,8 @@ const handleDeleteEvent = async (id) => {
               const dayEvs    = eventsOnDay(cell);
               const dayEngs   = engagementsOnDay(cell);
               const dayGrcs   = grcAssessmentsOnDay(cell);
-              const total     = dayEvs.length + dayEngs.length + dayGrcs.length;
+              const dayGrcProjects = grcProjectsOnDay(cell);
+              const total     = dayEvs.length + dayEngs.length + dayGrcs.length + dayGrcProjects.length;
               const visible   = 4;
               return (
                 <Box key={i}
@@ -1346,7 +1470,10 @@ const handleDeleteEvent = async (id) => {
                       {dayGrcs.slice(0, Math.max(0, visible - dayEngs.length)).map(a => (
                         <GrcAssessmentChip key={`grc-${a.id}`} assessment={a} onClick={() => navigate(`/assessments/${a.id}`)} />
                       ))}
-                      {dayEvs.slice(0, Math.max(0, visible - dayEngs.length - dayGrcs.length)).map(ev => (
+                      {dayGrcProjects.slice(0, Math.max(0, visible - dayEngs.length - dayGrcs.length)).map(p => (
+                        <GrcProjectChip key={`grc-project-${p.id}`} project={p} onClick={() => navigate(`/grc/${p.id}`)} />
+                      ))}
+                      {dayEvs.slice(0, Math.max(0, visible - dayEngs.length - dayGrcs.length - dayGrcProjects.length)).map(ev => (
                         <EventChip key={ev.id} event={ev} onClick={openDetail} />
                       ))}
                       {total > visible && (
@@ -1404,8 +1531,9 @@ const handleDeleteEvent = async (id) => {
               <tbody onDragEnd={() => {
                 dragOverRef.current = { member: null, day: null };
                 dragGrcRef.current  = null;
+                dragGrcProjectRef.current = null;
                 setDragEng(null); setDragTask(null); setDragGridEvent(null);
-                setDragPoolEvent(null); setDragGrcAssessment(null); setDragSourceMember(null);
+                setDragPoolEvent(null); setDragGrcAssessment(null); setDragGrcProject(null); setDragSourceMember(null);
                 setDragOverMember(null); setDragOverDay(null);
               }}>
                 {displayMembers.length === 0 ? (
@@ -1432,9 +1560,9 @@ const handleDeleteEvent = async (id) => {
                     {wDays.map(day => {
                       const isToday    = day.isSame(today, 'day');
                       const cellDate   = day.format('YYYY-MM-DD');
-                      const { engs: memberEngs, evs: memberEvs, tasks: memberTasks, grcs: memberGrcs } =
-                        memberDayData[`${member.id}:${cellDate}`] || { engs: [], evs: [], tasks: [], grcs: [] };
-                      const isEmpty    = memberEngs.length === 0 && memberEvs.length === 0 && memberTasks.length === 0 && memberGrcs.length === 0;
+                      const { engs: memberEngs, evs: memberEvs, tasks: memberTasks, grcs: memberGrcs, grcProjects: memberGrcProjects } =
+                        memberDayData[`${member.id}:${cellDate}`] || { engs: [], evs: [], tasks: [], grcs: [], grcProjects: [] };
+                      const isEmpty    = memberEngs.length === 0 && memberEvs.length === 0 && memberTasks.length === 0 && memberGrcs.length === 0 && memberGrcProjects.length === 0;
                       const isDragSource = dragEng
                         ? memberEngs.some(e => e.id === dragEng.id)
                         : dragTask
@@ -1443,20 +1571,22 @@ const handleDeleteEvent = async (id) => {
                         ? memberEvs.some(e => e.id === dragGridEvent.id)
                         : dragGrcAssessment
                         ? memberGrcs.some(a => a.id === dragGrcAssessment.id)
+                        : dragGrcProject
+                        ? memberGrcProjects.some(p => p.id === dragGrcProject.id)
                         : false;
                       const isInPreview  = !!projectedRange &&
-                        dragOverMember === member.id &&
+                        sameId(dragOverMember, member.id) &&
                         cellDate >= projectedRange.new_start_date &&
                         cellDate <= projectedRange.new_end_date;
                       // Highlight drop target for pool event drags (single cell, no range preview)
-                      const isEventDrop  = (!!dragPoolEvent || !!dragGridEvent || !!dragGrcAssessment || !!dragGrcRef.current) && dragOverMember === member.id && cellDate === dragOverDay;
+                      const isEventDrop  = (!!dragPoolEvent || !!dragGridEvent || !!dragGrcAssessment || !!dragGrcRef.current || !!dragGrcProject || !!dragGrcProjectRef.current) && sameId(dragOverMember, member.id) && cellDate === dragOverDay;
                       const isDropCell   = (isInPreview && cellDate === dragOverDay) || isEventDrop;
                       return (
                         <td key={cellDate}
                           onDragOver={(e) => {
-                            if (dragEng || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current) {
+                            if (dragEng || dragPoolEvent || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current) {
                               e.preventDefault();
-                              if (dragOverRef.current.member !== member.id || dragOverRef.current.day !== cellDate) {
+                              if (!sameId(dragOverRef.current.member, member.id) || dragOverRef.current.day !== cellDate) {
                                 dragOverRef.current = { member: member.id, day: cellDate };
                                 setDragOverMember(member.id);
                                 setDragOverDay(cellDate);
@@ -1465,7 +1595,7 @@ const handleDeleteEvent = async (id) => {
                           }}
                           onDragLeave={(e) => {
                             if (!e.currentTarget.contains(e.relatedTarget)) {
-                              if (dragOverMember === member.id && dragOverDay === cellDate) {
+                              if (sameId(dragOverMember, member.id) && dragOverDay === cellDate) {
                                 setDragOverMember(null);
                                 setDragOverDay(null);
                               }
@@ -1473,16 +1603,15 @@ const handleDeleteEvent = async (id) => {
                           }}
                           onDrop={(e) => {
                             e.preventDefault();
-                            console.log('[drop] dragEng:', !!dragEng, 'dragGrcAssessment:', !!dragGrcAssessment, 'dragGrcRef:', !!dragGrcRef.current, 'dragSourceMember:', !!dragSourceMember);
-                            if (dragEng && dragSourceMember && member.id !== dragSourceMember.id) {
+                            if (dragEng && dragSourceMember && !sameId(member.id, dragSourceMember.id)) {
                               setReassignDlg({ engagement: dragEng, targetMember: member, sourceMember: dragSourceMember, targetDay: day });
-                            } else if (dragEng && dragSourceMember && member.id === dragSourceMember.id && day.format('YYYY-MM-DD') !== dragEng.start_date) {
+                            } else if (dragEng && dragSourceMember && sameId(member.id, dragSourceMember.id) && day.format('YYYY-MM-DD') !== dragEng.start_date) {
                               handleDateOnlyChange(dragEng, day);
                             } else if (dragEng && !dragSourceMember) {
                               handleAssignFromPool(dragEng, member, day);
-                            } else if (dragTask && dragSourceMember && member.id !== dragSourceMember.id) {
+                            } else if (dragTask && dragSourceMember && !sameId(member.id, dragSourceMember.id)) {
                               handleDragTaskInGrid(dragTask, member, day);
-                            } else if (dragTask && dragSourceMember && member.id === dragSourceMember.id && day.format('YYYY-MM-DD') !== dragTask.due_date) {
+                            } else if (dragTask && dragSourceMember && sameId(member.id, dragSourceMember.id) && day.format('YYYY-MM-DD') !== dragTask.due_date) {
                               handleDragTaskInGrid(dragTask, member, day); // same member, date change
                             } else if (dragTask && !dragSourceMember) {
                               handleAssignTaskFromPool(dragTask, member, day);
@@ -1492,11 +1621,13 @@ const handleDeleteEvent = async (id) => {
                               handleAssignEventFromPool(dragPoolEvent, member, day);
                             } else if (dragGrcAssessment || dragGrcRef.current) {
                               const grcItem = dragGrcAssessment || dragGrcRef.current;
-                              if (dragSourceMember && member.id !== dragSourceMember.id) {
+                              if (dragSourceMember && !sameId(member.id, dragSourceMember.id)) {
                                 setGrcReassignDlg({ assessment: grcItem, targetMember: member, sourceMember: dragSourceMember, targetDay: day });
                               } else {
                                 handleAssignGrcFromPool(grcItem, member, day);
                               }
+                            } else if (dragGrcProject || dragGrcProjectRef.current) {
+                              handleAssignGrcProjectFromPool(dragGrcProject || dragGrcProjectRef.current, member, day);
                             }
                             setDragOverMember(null);
                             setDragOverDay(null);
@@ -1567,6 +1698,15 @@ const handleDeleteEvent = async (id) => {
                               isDragging={dragGrcAssessment?.id === a.id}
                             />
                           ))}
+                          {memberGrcProjects.map(p => (
+                            <GrcProjectChip
+                              key={`grc-project-${p.id}`}
+                              project={p}
+                              onClick={() => navigate(`/grc/${p.id}`)}
+                              onDragStart={(p) => { dragGrcProjectRef.current = p; setDragGrcProject(p); setDragSourceMember(member); setDragEng(null); }}
+                              isDragging={dragGrcProject?.id === p.id}
+                            />
+                          ))}
                           {isEmpty && !dragEng && (
                             <Box sx={{ height: 70, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0, '&:hover': { opacity: 1 } }}>
                               <Typography sx={{ fontSize: '0.65rem', color: 'text.disabled' }}>+ Add</Typography>
@@ -1596,7 +1736,7 @@ const handleDeleteEvent = async (id) => {
       {viewMode === 'team' && !isClient && (
         <Paper
           onDragOver={(e) => {
-            if (dragSourceMember && (dragEng || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current)) {
+            if (dragSourceMember && (dragEng || dragTask || dragGridEvent || dragGrcAssessment || dragGrcRef.current || dragGrcProject || dragGrcProjectRef.current)) {
               e.preventDefault();
               setDraggingOverPool(true);
             }
@@ -1617,7 +1757,7 @@ const handleDeleteEvent = async (id) => {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="subtitle1" fontWeight={700}>Unassigned Pool</Typography>
               {(() => {
-                const poolTotal = unassignedEngagements.length + unassignedTasks.length + unassignedEvents.length + unassignedGrcAssessments.length;
+                const poolTotal = unassignedEngagements.length + unassignedTasks.length + unassignedEvents.length + unassignedGrcAssessments.length + unassignedGrcProjects.length;
                 return poolTotal > 0
                   ? <Chip label={poolTotal} size="small" sx={{ height: 20, fontSize: '0.68rem', fontWeight: 700, bgcolor: '#c0392b', color: '#fff' }} />
                   : <Chip label="0" size="small" sx={{ height: 20, fontSize: '0.68rem', bgcolor: '#27ae60', color: '#fff' }} />;
@@ -1632,7 +1772,7 @@ const handleDeleteEvent = async (id) => {
             <Tab label={`Penetration Tests (${unassignedEngagements.length})`} sx={{ minHeight: 36, fontSize: '0.78rem', py: 0.5 }} />
             <Tab label={`Tasks (${unassignedTasks.length})`} sx={{ minHeight: 36, fontSize: '0.78rem', py: 0.5 }} />
             <Tab label={`Events (${unassignedEvents.length})`} sx={{ minHeight: 36, fontSize: '0.78rem', py: 0.5 }} />
-            <Tab label={`GRC (${unassignedGrcAssessments.length})`} sx={{ minHeight: 36, fontSize: '0.78rem', py: 0.5, color: unassignedGrcAssessments.length > 0 ? '#7c3aed' : undefined }} />
+            <Tab label={`GRC (${unassignedGrcAssessments.length + unassignedGrcProjects.length})`} sx={{ minHeight: 36, fontSize: '0.78rem', py: 0.5, color: (unassignedGrcAssessments.length + unassignedGrcProjects.length) > 0 ? '#7c3aed' : undefined }} />
           </Tabs>
 
           {/* Tab 0: Engagements */}
@@ -1783,12 +1923,12 @@ const handleDeleteEvent = async (id) => {
 
           {/* Tab 3: GRC Assessments (unassigned — no consultant) */}
           {poolTab === 3 && (
-            unassignedGrcAssessments.length === 0 ? (
+            (unassignedGrcAssessments.length + unassignedGrcProjects.length) === 0 ? (
               <Box sx={{ py: 2, display: 'flex', alignItems: 'center', gap: 1.5, color: 'text.secondary' }}>
                 <Box sx={{ width: 32, height: 32, borderRadius: '50%', bgcolor: '#27ae6015', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <Check sx={{ fontSize: 18, color: '#27ae60' }} />
                 </Box>
-                <Typography variant="body2">All GRC assessments have a consultant assigned.</Typography>
+                <Typography variant="body2">All GRC work has an owner assigned.</Typography>
               </Box>
             ) : (
               <Box sx={{
@@ -1798,6 +1938,66 @@ const handleDeleteEvent = async (id) => {
                 '&::-webkit-scrollbar-track': { bgcolor: 'action.hover', borderRadius: 3 },
                 '&::-webkit-scrollbar-thumb': { bgcolor: 'text.disabled', borderRadius: 3 },
               }}>
+                {unassignedGrcProjects.map(p => {
+                  const s = GRC_PROJECT_STATUS[p.status] || GRC_PROJECT_STATUS.ACTIVE;
+                  const isDraggingThis = dragGrcProject?.id === p.id;
+                  return (
+                    <div
+                      key={`grc-project-${p.id}`}
+                      draggable="true"
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', `grc-project:${p.id}`);
+                        e.dataTransfer.effectAllowed = 'move';
+                        dragGrcProjectRef.current = p;
+                        setDragGrcProject(p);
+                        setDragGrcAssessment(null);
+                        setDragEng(null);
+                        setDragSourceMember(null);
+                      }}
+                      onDragEnd={() => {
+                        dragGrcProjectRef.current = null;
+                        setDragGrcProject(null);
+                        setDragOverMember(null);
+                        setDragOverDay(null);
+                      }}
+                      onClick={() => navigate(`/grc/${p.id}`)}
+                      style={{
+                        flexShrink: 0, width: 210,
+                        background: theme.palette.background.paper,
+                        border: `1px solid ${isDraggingThis ? s.border : theme.palette.divider}`,
+                        borderTop: `3px solid ${s.border}`,
+                        borderRadius: 8,
+                        padding: 12,
+                        cursor: isDraggingThis ? 'grabbing' : 'grab',
+                        opacity: isDraggingThis ? 0.35 : 1,
+                        boxShadow: isDraggingThis ? 'none' : '0 1px 4px rgba(0,0,0,0.08)',
+                        userSelect: 'none',
+                        transition: 'box-shadow 0.15s ease, transform 0.15s ease',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 4, marginBottom: 6, pointerEvents: 'none' }}>
+                        <span style={{ fontSize: 12, color: '#999', flexShrink: 0 }}>::</span>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700, lineHeight: 1.3, flex: 1, overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                          GRC Project · {p.title}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 4, marginBottom: 6, flexWrap: 'wrap', pointerEvents: 'none' }}>
+                        <span style={{ fontSize: '0.62rem', fontWeight: 600, background: s.bg, color: s.text, border: `1px solid ${s.border}50`, borderRadius: 10, padding: '1px 6px' }}>
+                          Project · {s.label}
+                        </span>
+                        <span style={{ fontSize: '0.62rem', background: '#fef2f2', color: '#c0392b', border: '1px solid #c0392b40', borderRadius: 10, padding: '1px 6px' }}>
+                          Unassigned
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.7rem', color: '#888', marginBottom: 4, pointerEvents: 'none' }}>
+                        {p.framework_name || p.framework_key || 'GRC'}
+                      </div>
+                      <div style={{ fontSize: '0.65rem', color: '#aaa', fontFamily: 'monospace', pointerEvents: 'none' }}>
+                        Target: {p.target_date || 'Not scheduled'}
+                      </div>
+                    </div>
+                  );
+                })}
                 {unassignedGrcAssessments.map(a => {
                   const s = GRC_STATUS[a.status] || GRC_STATUS.DRAFT;
                   const isDraggingThis = dragGrcAssessment?.id === a.id;
@@ -1806,7 +2006,6 @@ const handleDeleteEvent = async (id) => {
                       key={a.id}
                       draggable="true"
                       onDragStart={(e) => {
-                        console.log('[GRC POOL] dragstart fired for:', a.title);
                         e.dataTransfer.setData('text/plain', String(a.id));
                         e.dataTransfer.effectAllowed = 'move';
                         dragGrcRef.current = a;
@@ -1815,7 +2014,6 @@ const handleDeleteEvent = async (id) => {
                         setDragSourceMember(null);
                       }}
                       onDragEnd={() => {
-                        console.log('[GRC drag] ended');
                         dragGrcRef.current = null;
                         setDragGrcAssessment(null);
                         setDragOverMember(null);
@@ -1984,7 +2182,7 @@ const handleDeleteEvent = async (id) => {
             {/* Stats row */}
             <Box sx={{ display: 'flex', gap: 2.5, flexWrap: 'wrap', alignItems: 'center' }}>
               {TASK_STATUSES.map(s => {
-                const base = mineOnly ? tasks.filter(t => Number(t.assigned_to) === myUserId) : tasks;
+                const base = mineOnly ? tasks.filter(t => sameId(t.assigned_to, myUserId)) : tasks;
                 const count = base.filter(t => t.status === s.value).length;
                 return (
                   <Box key={s.value} sx={{ display: 'flex', alignItems: 'center', gap: 0.6, cursor: 'pointer' }}

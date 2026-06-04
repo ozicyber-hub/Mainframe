@@ -44,15 +44,21 @@ class GrcControlSerializer(serializers.ModelSerializer):
 class GrcProjectListSerializer(serializers.ModelSerializer):
     framework_key  = serializers.CharField(source='framework.key', read_only=True)
     framework_name = serializers.CharField(source='framework.name', read_only=True)
+    assessor_name  = serializers.SerializerMethodField()
     stats          = serializers.SerializerMethodField()
 
     class Meta:
         model  = GrcProject
         fields = ['id', 'title', 'framework_key', 'framework_name', 'status',
-                  'target_date', 'created_at', 'stats']
+                  'target_date', 'assessor', 'assessor_name', 'created_at', 'stats']
 
     def get_stats(self, obj):
         return obj.completion_stats()
+
+    def get_assessor_name(self, obj):
+        if obj.assessor:
+            return f"{obj.assessor.first_name} {obj.assessor.last_name}".strip() or obj.assessor.email
+        return None
 
 
 class GrcProjectDetailSerializer(serializers.ModelSerializer):
@@ -67,7 +73,7 @@ class GrcProjectDetailSerializer(serializers.ModelSerializer):
         model  = GrcProject
         fields = ['id', 'title', 'description', 'framework_id', 'framework_key', 'framework_name',
                   'status', 'notes', 'target_date', 'created_at', 'updated_at',
-                  'assessor_name', 'created_by_name', 'stats']
+                  'assessor', 'assessor_name', 'created_by_name', 'stats']
 
     def get_stats(self, obj):
         return obj.completion_stats()
