@@ -1,13 +1,10 @@
 from datetime import date
 from io import BytesIO
-from io import StringIO
-from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
@@ -167,28 +164,6 @@ class ReportDocxExportTemplateTests(TestCase):
         passed_template_file = mock_generate.call_args.args[2]
         self.assertIn('selected_template', passed_template_file.name)
 
-    @patch('reports.generator.generate_report_docx')
-    def test_docx_export_repairs_missing_seeded_template_file(self, mock_generate):
-        mock_generate.return_value = BytesIO(b'generated docx')
-        template = ReportTemplate.objects.create(
-            name='Penetration Test Report v1.0',
-            is_global=True,
-            created_by=self.user,
-        )
-        template.docx_file.name = 'report_templates/ozicyber_generator_template.docx'
-        template.save(update_fields=['docx_file'])
-        target = Path(self.media_root.name) / template.docx_file.name
-        self.assertFalse(target.exists())
-
-        response = self.client.post(
-            self.export_url,
-            {'format': 'DOCX', 'template_id': template.pk},
-            format='json',
-        )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(target.exists())
-
     def test_docx_generator_has_no_default_template_fallback(self):
         with self.assertRaisesMessage(ValueError, 'A DOCX report template is required.'):
             generate_report_docx(self.report, [], None)
@@ -213,21 +188,34 @@ class ReportDocxExportTemplateTests(TestCase):
         self.assertIsNone(template.organization)
         self.assertTrue(template.is_global)
 
-    def test_repair_report_template_files_restores_seeded_template(self):
+    def test_template_download_streams_uploaded_docx(self):
         template = ReportTemplate.objects.create(
             name='Penetration Test Report v1.0',
             is_global=True,
             created_by=self.user,
         )
-        template.docx_file.name = 'report_templates/ozicyber_generator_template.docx'
+        template.docx_file.save(
+            'downloadable_template.docx',
+            ContentFile(b'uploaded template bytes'),
+            save=True,
+        )
+
+        response = self.client.get(f'/api/reports/templates/{template.pk}/download_docx/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(b''.join(response.streaming_content), b'uploaded template bytes')
+        self.assertIn('Penetration_Test_Report_v1.0.docx', response['Content-Disposition'])
+
+    def test_template_download_returns_404_when_file_is_missing(self):
+        template = ReportTemplate.objects.create(
+            name='Missing Template File',
+            is_global=True,
+            created_by=self.user,
+        )
+        template.docx_file.name = 'report_templates/missing.docx'
         template.save(update_fields=['docx_file'])
 
-        target = Path(self.media_root.name) / template.docx_file.name
-        self.assertFalse(target.exists())
+        response = self.client.get(f'/api/reports/templates/{template.pk}/download_docx/')
 
-        output = StringIO()
-        call_command('repair_report_template_files', stdout=output)
-
-        self.assertTrue(target.exists())
-        self.assertGreater(target.stat().st_size, 0)
-        self.assertIn('Repaired 1 template reference', output.getvalue())
+        self.assertEqual(response.status_code, 404)
+        self.assertIn('missing or unavailable', response.data['error'])

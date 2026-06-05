@@ -5,7 +5,7 @@ services:
     rootDir: backend
     plan: starter
     buildCommand: bash build.sh
-    preDeployCommand: python manage.py migrate && python manage.py repair_report_template_files
+    preDeployCommand: python manage.py migrate
     startCommand: gunicorn ozireport.wsgi:application
     disk:
       name: mainframe-media

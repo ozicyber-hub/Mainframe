@@ -7,7 +7,6 @@ from rest_framework.decorators import action
 from django.http import FileResponse, HttpResponse
 from .models import Report, ReportTemplate, ReportExport, ReportMessage, AttackChainEntry
 from .serializers import ReportSerializer, ReportCreateSerializer, ReportTemplateSerializer, ReportExportSerializer, ReportMessageSerializer, AttackChainEntrySerializer
-from .template_files import ensure_seeded_report_template_file
 from findings.models import Finding
 import re
 
@@ -82,6 +81,31 @@ class ReportTemplateViewSet(viewsets.ModelViewSet):
         tmpl.is_default = True
         tmpl.save(update_fields=['is_default'])
         return Response({'is_default': True})
+
+    @action(detail=True, methods=['get'])
+    def download_docx(self, request, pk=None):
+        tmpl = self.get_object()
+        if not tmpl.docx_file or not tmpl.docx_file.name:
+            return Response(
+                {'error': f'Report template "{tmpl.name}" has no DOCX file uploaded.'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        try:
+            file_handle = tmpl.docx_file.open('rb')
+        except Exception as e:
+            return Response(
+                {'error': f'Report template "{tmpl.name}" file is missing or unavailable: {e}'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        safe_name = re.sub(r'[^\w\s.-]', '', tmpl.name).strip().replace(' ', '_') or 'report_template'
+        response = FileResponse(
+            file_handle,
+            content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{safe_name}.docx"'
+        return response
 
 
 class ReportViewSet(viewsets.ModelViewSet):
@@ -183,11 +207,6 @@ class ReportViewSet(viewsets.ModelViewSet):
                     {'error': f'Selected report template "{template.name}" has no DOCX file uploaded.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-
-            ensure_seeded_report_template_file(
-                template.docx_file.name,
-                storage=template.docx_file.storage,
-            )
 
             try:
                 template.docx_file.open('rb')

@@ -821,6 +821,37 @@ const ReportTemplatesTab = () => {
     catch { enqueueSnackbar('Delete failed', { variant: 'error' }); }
   };
 
+  const handleDownload = async (template) => {
+    try {
+      const resp = await api.get(`/reports/templates/${template.id}/download_docx/`, {
+        responseType: 'blob',
+      });
+      const url = window.URL.createObjectURL(new Blob([resp.data]));
+      const link = document.createElement('a');
+      const cd = resp.headers['content-disposition'] || '';
+      const match = cd.match(/filename="?([^"]+)"?/);
+      link.href = url;
+      link.download = match ? match[1] : `${template.name || 'report_template'}.docx`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      let msg = 'Download failed';
+      const blob = err?.response?.data;
+      if (blob instanceof Blob) {
+        try {
+          const text = await blob.text();
+          const parsed = JSON.parse(text);
+          if (parsed?.error) msg = parsed.error;
+        } catch {}
+      } else if (err?.response?.data?.error) {
+        msg = err.response.data.error;
+      }
+      enqueueSnackbar(msg, { variant: 'error' });
+    }
+  };
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
@@ -853,7 +884,7 @@ const ReportTemplatesTab = () => {
                   </Box>
                   <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
                     {t.docx_url && (
-                      <Tooltip title="Download"><IconButton size="small" component="a" href={t.docx_url} download><Download fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Download"><IconButton size="small" onClick={() => handleDownload(t)}><Download fontSize="small" /></IconButton></Tooltip>
                     )}
                     <Tooltip title={t.is_default ? 'Already default' : 'Set as default'}>
                       <span>

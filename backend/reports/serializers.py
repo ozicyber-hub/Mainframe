@@ -28,9 +28,10 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
     def get_docx_url(self, obj):
         if obj.docx_file:
             request = self.context.get('request')
+            path = f'/api/reports/templates/{obj.pk}/download_docx/'
             if request:
-                return request.build_absolute_uri(obj.docx_file.url)
-            return obj.docx_file.url
+                return request.build_absolute_uri(path)
+            return path
         return None
 
 
