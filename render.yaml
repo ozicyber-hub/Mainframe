@@ -5,8 +5,12 @@ services:
     rootDir: backend
     plan: starter
     buildCommand: bash build.sh
-    preDeployCommand: python manage.py migrate
+    preDeployCommand: python manage.py migrate && python manage.py repair_report_template_files
     startCommand: gunicorn ozireport.wsgi:application
+    disk:
+      name: mainframe-media
+      mountPath: /var/data/mainframe-media
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -28,6 +32,8 @@ services:
         value: https://mainframe.ozicyber.com.au,https://*.mainframe.ozicyber.com.au
       - key: FRONTEND_URL
         value: https://mainframe.ozicyber.com.au
+      - key: MEDIA_ROOT
+        value: /var/data/mainframe-media
       - key: EMAIL_HOST
         value: smtp.gmail.com
       - key: EMAIL_PORT
