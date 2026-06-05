@@ -23,9 +23,9 @@ services:
       - key: CORS_ALLOWED_ORIGINS
         value: https://mainframe.ozicyber.com.au
       - key: CORS_ALLOWED_ORIGIN_REGEXES
-        value: ^https://mainframe-web.*\.onrender\.com$
+        value: ^https://mainframe-web.*\.onrender\.com$,^https://[a-z0-9-]+\.mainframe\.ozicyber\.com\.au$
       - key: CSRF_TRUSTED_ORIGINS
-        value: https://mainframe.ozicyber.com.au
+        value: https://mainframe.ozicyber.com.au,https://*.mainframe.ozicyber.com.au
       - key: FRONTEND_URL
         value: https://mainframe.ozicyber.com.au
       - key: EMAIL_HOST
@@ -45,7 +45,7 @@ services:
     staticPublishPath: build
     envVars:
       - key: REACT_APP_API_URL
-        value: https://mainframe-api-79cu.onrender.com
+        value: https://mainframe-api.ozicyber.com.au
 
 databases:
   - name: mainframe-db

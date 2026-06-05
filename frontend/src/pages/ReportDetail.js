@@ -776,17 +776,12 @@ const ReportDetail = () => {
     setDocxTemplatesLoading(true);
     try {
       const res = await api.get('/reports/templates/');
-      const templates = (res.data?.results ?? res.data) || [];
+      const templates = ((res.data?.results ?? res.data) || []).filter(t => t.docx_url || t.docx_file);
       setDocxTemplates(templates);
       // Pre-select the report's linked template if present
       if (report?.template) {
         const linked = templates.find(t => t.id === report.template);
         if (linked) setDocxTemplateId(String(linked.id));
-      }
-      // Otherwise pre-select the org default
-      if (!report?.template) {
-        const def = templates.find(t => t.is_default);
-        if (def) setDocxTemplateId(String(def.id));
       }
     } catch {
       enqueueSnackbar('Could not load templates', { variant: 'warning' });
@@ -796,11 +791,14 @@ const ReportDetail = () => {
   };
 
   const handleGenerateDocx = async () => {
+    if (!docxTemplateId) {
+      enqueueSnackbar('Select a DOCX report template before generating.', { variant: 'error' });
+      return;
+    }
     setDocxGenerating(true);
     enqueueSnackbar('Generating DOCX — this may take a few seconds…', { variant: 'info', key: 'docx-gen' });
     try {
-      const body = { format: 'DOCX' };
-      if (docxTemplateId) body.template_id = parseInt(docxTemplateId, 10);
+      const body = { format: 'DOCX', template_id: parseInt(docxTemplateId, 10) };
       const resp = await api.post(`/reports/${id}/export/`, body, { responseType: 'blob', timeout: 120000 });
       await _downloadBlob(resp, `report_${id}.docx`);
       enqueueSnackbar('DOCX downloaded', { variant: 'success', key: 'docx-gen' });
@@ -1968,8 +1966,8 @@ const ReportDetail = () => {
                 label="Template"
                 onChange={e => setDocxTemplateId(e.target.value)}
               >
-                <MenuItem value="">
-                  <em>Built-in fallback (no template selected)</em>
+                <MenuItem value="" disabled>
+                  <em>Select a DOCX template</em>
                 </MenuItem>
                 {docxTemplates.map(t => (
                   <MenuItem key={t.id} value={String(t.id)}>
@@ -1984,7 +1982,7 @@ const ReportDetail = () => {
           )}
           {!docxTemplatesLoading && docxTemplates.length === 0 && (
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-              No templates uploaded yet — the built-in template will be used.
+              No DOCX report templates are available. Upload one before generating.
             </Typography>
           )}
         </DialogContent>
@@ -1993,7 +1991,7 @@ const ReportDetail = () => {
           <Button
             variant="contained"
             onClick={handleGenerateDocx}
-            disabled={docxGenerating || docxTemplatesLoading}
+            disabled={docxGenerating || docxTemplatesLoading || !docxTemplateId}
             startIcon={docxGenerating ? <CircularProgress size={16} color="inherit" /> : <Download />}
             sx={{ bgcolor: '#24483E', '&:hover': { bgcolor: '#1a3329' } }}
           >

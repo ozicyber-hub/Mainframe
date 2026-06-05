@@ -3,7 +3,7 @@
 Use `<<placeholder>>` markers in your `.docx` report template. No Jinja2, no docxtpl.
 Upload your template via **Repository → Report Templates**, then set it as the default for your organisation.
 
-Run `backend/scripts/build_template.py` to generate a ready-to-use starter template.
+DOCX exports only use the template selected on the report/export request. There is no bundled fallback template.
 
 ---
 

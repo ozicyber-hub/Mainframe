@@ -31,11 +31,6 @@ from docx.oxml import OxmlElement
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_TEMPLATE_PATH = os.path.normpath(
-    os.path.join(BASE_DIR, '..', 'report_fixtures', 'template.docx')
-)
-
 CONSEQUENCE_MAP = {'HIGH': 'Major', 'MEDIUM': 'Moderate', 'LOW': 'Minor'}
 LIKELIHOOD_MAP  = {'HIGH': 'Likely', 'MEDIUM': 'Possible', 'LOW': 'Unlikely'}
 SEVERITIES = ['CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFORMATIONAL']
@@ -1676,16 +1671,21 @@ def _remove_detailed_findings_heading(doc):
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def generate_report_docx(report_obj, findings_qs, template_path=None):
+def generate_report_docx(report_obj, findings_qs, template_path):
     """
     Render a python-docx Word template with report data.
     Returns a BytesIO containing the populated .docx.
     """
-    path = template_path or DEFAULT_TEMPLATE_PATH
-    if not os.path.exists(path):
-        raise FileNotFoundError(f'Template not found: {path}')
+    if not template_path:
+        raise ValueError('A DOCX report template is required.')
 
-    doc = Document(path)
+    if isinstance(template_path, (str, os.PathLike)):
+        path = os.fspath(template_path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f'Template not found: {path}')
+        doc = Document(path)
+    else:
+        doc = Document(template_path)
 
     # Normalise all <<MARKER>> text to lowercase so templates are case-insensitive.
     # <<F.DESCRIPTION>>, <<f.description>>, <<F.Description>> all work identically.

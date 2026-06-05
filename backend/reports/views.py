@@ -5,26 +5,19 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from django.http import FileResponse, HttpResponse
-from django.conf import settings
 from .models import Report, ReportTemplate, ReportExport, ReportMessage, AttackChainEntry
 from .serializers import ReportSerializer, ReportCreateSerializer, ReportTemplateSerializer, ReportExportSerializer, ReportMessageSerializer, AttackChainEntrySerializer
 from findings.models import Finding
 import re
-import os
 
 
 _REPORT_WRITE_ROLES = {'SUPERADMIN', 'ADMIN', 'PENTESTER', 'PROJECT_MANAGER'}
 _TEMPLATE_ADMIN_ROLES = {'SUPERADMIN', 'ADMIN'}
 
 
-def _existing_docx_template_path(template):
-    if not template or not template.docx_file or not template.docx_file.name:
-        return None
-    try:
-        path = template.docx_file.path
-    except (NotImplementedError, ValueError):
-        return None
-    return path if os.path.exists(path) else None
+def _template_allowed_for_report(template, report):
+    report_org_id = getattr(report.engagement, 'organization_id', None)
+    return template.is_global or template.organization_id == report_org_id
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):
@@ -126,7 +119,7 @@ class ReportViewSet(viewsets.ModelViewSet):
 
         Body params:
           format      — must be 'DOCX' (PDF/XLSX return 501 for now)
-          template_id — optional; overrides the report's linked template
+          template_id — required unless the report already has a linked template
         """
         self._require_report_writer()
         report = self.get_object()
@@ -147,48 +140,54 @@ class ReportViewSet(viewsets.ModelViewSet):
                 engagement=report.engagement
             ).select_related('engagement')
 
-            # Resolve template (priority order):
-            #   1. template_id from request body (user's explicit pick)
-            #   2. template linked directly to this report
-            #   3. org's default template (is_default=True)
-            #   4. any uploaded template for the org (most recently created)
-            #   5. global default / most-recent global
-            #   6. built-in fallback on disk
-            from django.db.models import Q
-            has_file = ~Q(docx_file='') & ~Q(docx_file__isnull=True)
-            template_path = None
-
             template_id = request.data.get('template_id')
             if template_id:
                 try:
-                    picked = ReportTemplate.objects.get(pk=template_id)
-                    template_path = _existing_docx_template_path(picked)
+                    template_id = int(template_id)
+                except (TypeError, ValueError):
+                    return Response({'error': 'Invalid report template selection.'},
+                                    status=status.HTTP_400_BAD_REQUEST)
+
+                try:
+                    template = ReportTemplate.objects.get(pk=template_id)
                 except ReportTemplate.DoesNotExist:
-                    pass
+                    return Response({'error': 'Selected report template was not found.'},
+                                    status=status.HTTP_404_NOT_FOUND)
+            else:
+                template = report.template
+                if not template:
+                    return Response(
+                        {'error': 'Select an uploaded DOCX report template before generating.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
 
-            if not template_path:
-                tmpl = report.template
-                template_path = _existing_docx_template_path(tmpl)
+            if not _template_allowed_for_report(template, report):
+                return Response(
+                    {'error': 'Selected report template is not available for this engagement.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
-            if not template_path:
-                org = getattr(report.engagement, 'organization', None)
-                candidate_templates = [
-                    ReportTemplate.objects.filter(has_file, organization=org, is_default=True).first(),
-                    ReportTemplate.objects.filter(has_file, organization=org).order_by('-created_at').first(),
-                    ReportTemplate.objects.filter(has_file, is_global=True, is_default=True).first(),
-                    ReportTemplate.objects.filter(has_file, is_global=True).order_by('-created_at').first(),
-                    ReportTemplate.objects.filter(has_file).order_by('-created_at').first(),
-                ]
-                for org_tmpl in candidate_templates:
-                    template_path = _existing_docx_template_path(org_tmpl)
-                    if template_path:
-                        break
+            if not template.docx_file or not template.docx_file.name:
+                return Response(
+                    {'error': f'Selected report template "{template.name}" has no DOCX file uploaded.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
 
             try:
-                buffer = generate_report_docx(report, findings_qs, template_path=template_path)
+                template.docx_file.open('rb')
             except Exception as e:
-                return Response({'error': f'Report generation failed: {e}'},
+                return Response(
+                    {'error': f'Selected report template "{template.name}" could not be opened: {e}'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            try:
+                buffer = generate_report_docx(report, findings_qs, template.docx_file)
+            except Exception as e:
+                return Response({'error': f'Report generation failed for template "{template.name}": {e}'},
                                 status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            finally:
+                template.docx_file.close()
 
             # Log the export
             ReportExport.objects.create(
