@@ -15,9 +15,11 @@ _REPORT_WRITE_ROLES = {'SUPERADMIN', 'ADMIN', 'PENTESTER', 'PROJECT_MANAGER'}
 _TEMPLATE_ADMIN_ROLES = {'SUPERADMIN', 'ADMIN'}
 
 
-def _template_allowed_for_report(template, report):
+def _template_allowed_for_report(template, report, user=None):
     report_org_id = getattr(report.engagement, 'organization_id', None)
-    return template.is_global or template.organization_id == report_org_id
+    if template.is_global or template.organization_id == report_org_id:
+        return True
+    return bool(user and user.is_superuser and template.organization_id is None)
 
 
 class ReportTemplateViewSet(viewsets.ModelViewSet):
@@ -42,10 +44,18 @@ class ReportTemplateViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._require_template_admin()
-        serializer.save(
-            created_by=self.request.user,
-            organization=self.request.user.organization,
-        )
+        user = self.request.user
+        organization = user.organization
+        save_kwargs = {
+            'created_by': user,
+            'organization': organization,
+        }
+        if organization is None:
+            if not user.is_superuser:
+                from rest_framework.exceptions import ValidationError
+                raise ValidationError('Your account must belong to an organisation to create report templates.')
+            save_kwargs['is_global'] = True
+        serializer.save(**save_kwargs)
 
     def perform_update(self, serializer):
         self._require_template_admin()
@@ -161,7 +171,7 @@ class ReportViewSet(viewsets.ModelViewSet):
                         status=status.HTTP_400_BAD_REQUEST,
                     )
 
-            if not _template_allowed_for_report(template, report):
+            if not _template_allowed_for_report(template, report, request.user):
                 return Response(
                     {'error': 'Selected report template is not available for this engagement.'},
                     status=status.HTTP_400_BAD_REQUEST,

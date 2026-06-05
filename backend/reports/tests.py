@@ -118,6 +118,27 @@ class ReportDocxExportTemplateTests(TestCase):
         self.assertIn('not available for this engagement', response.data['error'])
 
     @patch('reports.generator.generate_report_docx')
+    def test_docx_export_allows_superadmin_orphan_template(self, mock_generate):
+        mock_generate.return_value = BytesIO(b'generated docx')
+        template = ReportTemplate.objects.create(
+            name='Superadmin Uploaded Template',
+            created_by=self.user,
+        )
+        template.docx_file.save(
+            'superadmin_template.docx',
+            ContentFile(b'placeholder'),
+            save=True,
+        )
+
+        response = self.client.post(
+            self.export_url,
+            {'format': 'DOCX', 'template_id': template.pk},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    @patch('reports.generator.generate_report_docx')
     def test_docx_export_uses_selected_uploaded_template(self, mock_generate):
         mock_generate.return_value = BytesIO(b'generated docx')
         template = ReportTemplate.objects.create(
@@ -146,3 +167,23 @@ class ReportDocxExportTemplateTests(TestCase):
     def test_docx_generator_has_no_default_template_fallback(self):
         with self.assertRaisesMessage(ValueError, 'A DOCX report template is required.'):
             generate_report_docx(self.report, [], None)
+
+    def test_superadmin_template_upload_without_organisation_becomes_global(self):
+        self.user.organization = None
+        self.user.save(update_fields=['organization'])
+
+        response = self.client.post(
+            '/api/reports/templates/',
+            {
+                'name': 'Global Superadmin Template',
+                'description': '',
+                'primary_color': '#24483E',
+                'secondary_color': '#FFF1AA',
+            },
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+        template = ReportTemplate.objects.get(pk=response.data['id'])
+        self.assertIsNone(template.organization)
+        self.assertTrue(template.is_global)
