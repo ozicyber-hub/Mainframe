@@ -821,6 +821,21 @@ const ReportTemplatesTab = () => {
     catch { enqueueSnackbar('Delete failed', { variant: 'error' }); }
   };
 
+  const handleReplaceFile = async (template, file) => {
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('docx_file', file);
+    try {
+      await api.patch(`/reports/templates/${template.id}/`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      enqueueSnackbar('Template file updated', { variant: 'success' });
+      load();
+    } catch {
+      enqueueSnackbar('File update failed', { variant: 'error' });
+    }
+  };
+
   const handleDownload = async (template) => {
     try {
       const resp = await api.get(`/reports/templates/${template.id}/download_docx/`, {
@@ -883,9 +898,21 @@ const ReportTemplatesTab = () => {
                     </Typography>
                   </Box>
                   <Box sx={{ display: 'flex', gap: 0.5, flexShrink: 0 }}>
-                    {t.docx_url && (
-                      <Tooltip title="Download"><IconButton size="small" onClick={() => handleDownload(t)}><Download fontSize="small" /></IconButton></Tooltip>
-                    )}
+                    <Tooltip title="Download"><IconButton size="small" onClick={() => handleDownload(t)}><Download fontSize="small" /></IconButton></Tooltip>
+                    <Tooltip title="Replace DOCX file">
+                      <IconButton size="small" component="label">
+                        <Upload fontSize="small" />
+                        <input
+                          hidden
+                          type="file"
+                          accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                          onChange={e => {
+                            handleReplaceFile(t, e.target.files?.[0]);
+                            e.target.value = '';
+                          }}
+                        />
+                      </IconButton>
+                    </Tooltip>
                     <Tooltip title={t.is_default ? 'Already default' : 'Set as default'}>
                       <span>
                         <IconButton size="small" onClick={() => handleSetDefault(t.id)} disabled={t.is_default}>

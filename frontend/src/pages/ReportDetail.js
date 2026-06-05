@@ -776,7 +776,7 @@ const ReportDetail = () => {
     setDocxTemplatesLoading(true);
     try {
       const res = await api.get('/reports/templates/');
-      const templates = ((res.data?.results ?? res.data) || []).filter(t => t.docx_url || t.docx_file);
+      const templates = (res.data?.results ?? res.data) || [];
       setDocxTemplates(templates);
       // Pre-select the report's linked template if present
       if (report?.template) {
@@ -1970,10 +1970,13 @@ const ReportDetail = () => {
                   <em>Select a DOCX template</em>
                 </MenuItem>
                 {docxTemplates.map(t => (
-                  <MenuItem key={t.id} value={String(t.id)}>
+                  <MenuItem key={t.id} value={String(t.id)} disabled={!t.docx_file}>
                     {t.name}
                     {t.is_default && (
                       <Chip label="default" size="small" sx={{ ml: 1, height: 18, fontSize: 10 }} />
+                    )}
+                    {!t.docx_file && (
+                      <Chip label="missing file" size="small" color="warning" sx={{ ml: 1, height: 18, fontSize: 10 }} />
                     )}
                   </MenuItem>
                 ))}

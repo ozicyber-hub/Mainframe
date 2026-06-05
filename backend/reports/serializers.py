@@ -26,13 +26,11 @@ class ReportTemplateSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
     def get_docx_url(self, obj):
-        if obj.docx_file:
-            request = self.context.get('request')
-            path = f'/api/reports/templates/{obj.pk}/download_docx/'
-            if request:
-                return request.build_absolute_uri(path)
-            return path
-        return None
+        request = self.context.get('request')
+        path = f'/api/reports/templates/{obj.pk}/download_docx/'
+        if request:
+            return request.build_absolute_uri(path)
+        return path
 
 
 class ReportSerializer(serializers.ModelSerializer):

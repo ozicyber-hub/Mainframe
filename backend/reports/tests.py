@@ -219,3 +219,17 @@ class ReportDocxExportTemplateTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertIn('missing or unavailable', response.data['error'])
+
+    def test_template_list_includes_download_endpoint_even_without_file(self):
+        template = ReportTemplate.objects.create(
+            name='Template Metadata Only',
+            is_global=True,
+            created_by=self.user,
+        )
+
+        response = self.client.get('/api/reports/templates/')
+
+        self.assertEqual(response.status_code, 200)
+        results = response.data['results'] if 'results' in response.data else response.data
+        row = next(item for item in results if item['id'] == template.pk)
+        self.assertIn(f'/api/reports/templates/{template.pk}/download_docx/', row['docx_url'])
