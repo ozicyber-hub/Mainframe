@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from django.http import FileResponse, HttpResponse
 from .models import Report, ReportTemplate, ReportExport, ReportMessage, AttackChainEntry
 from .serializers import ReportSerializer, ReportCreateSerializer, ReportTemplateSerializer, ReportExportSerializer, ReportMessageSerializer, AttackChainEntrySerializer
+from .template_files import ensure_seeded_report_template_file
 from findings.models import Finding
 import re
 
@@ -182,6 +183,11 @@ class ReportViewSet(viewsets.ModelViewSet):
                     {'error': f'Selected report template "{template.name}" has no DOCX file uploaded.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+
+            ensure_seeded_report_template_file(
+                template.docx_file.name,
+                storage=template.docx_file.storage,
+            )
 
             try:
                 template.docx_file.open('rb')

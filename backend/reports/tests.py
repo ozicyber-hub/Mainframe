@@ -167,6 +167,28 @@ class ReportDocxExportTemplateTests(TestCase):
         passed_template_file = mock_generate.call_args.args[2]
         self.assertIn('selected_template', passed_template_file.name)
 
+    @patch('reports.generator.generate_report_docx')
+    def test_docx_export_repairs_missing_seeded_template_file(self, mock_generate):
+        mock_generate.return_value = BytesIO(b'generated docx')
+        template = ReportTemplate.objects.create(
+            name='Penetration Test Report v1.0',
+            is_global=True,
+            created_by=self.user,
+        )
+        template.docx_file.name = 'report_templates/ozicyber_generator_template.docx'
+        template.save(update_fields=['docx_file'])
+        target = Path(self.media_root.name) / template.docx_file.name
+        self.assertFalse(target.exists())
+
+        response = self.client.post(
+            self.export_url,
+            {'format': 'DOCX', 'template_id': template.pk},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(target.exists())
+
     def test_docx_generator_has_no_default_template_fallback(self):
         with self.assertRaisesMessage(ValueError, 'A DOCX report template is required.'):
             generate_report_docx(self.report, [], None)
